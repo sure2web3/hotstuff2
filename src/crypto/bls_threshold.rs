@@ -6,8 +6,7 @@ use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
 use ff::Field;
 use group::Curve;
 use rand_core::{CryptoRng, RngCore};
-use rand_chacha::ChaCha20Rng;
-use rand_core::SeedableRng;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::HotStuffError;

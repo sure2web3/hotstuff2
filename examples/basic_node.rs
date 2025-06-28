@@ -48,7 +48,7 @@ async fn main() -> Result<(), HotStuffError> {
 
     // Create a sample block
     let parent_hash = Hash::from_bytes(b"genesis");
-    let transactions = vec![Transaction::new(b"Hello, HotStuff-2!".to_vec())];
+    let transactions = vec![Transaction::new("tx1".to_string(), b"Hello, HotStuff-2!".to_vec())];
     
     let block = Block::new(
         parent_hash,

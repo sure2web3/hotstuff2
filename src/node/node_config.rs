@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Clone, Debug)]
 pub struct NodeConfig {
     pub node_id: u64,

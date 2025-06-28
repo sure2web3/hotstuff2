@@ -188,7 +188,7 @@ impl ThresholdSigner {
     /// Verify a threshold signature
     pub fn verify_threshold(
         &self,
-        message: &[u8],
+        _message: &[u8],
         signature: &ThresholdSignature,
     ) -> Result<bool, HotStuffError> {
         if signature.signers.len() < signature.threshold {
@@ -308,7 +308,8 @@ mod tests {
         let partial1 = signer1.sign_partial(message).unwrap();
         let partial2 = signer2.sign_partial(message).unwrap();
         
-        // Add partial signatures to signer1
+        // Add partial signatures to signer1 (including its own)
+        signer1.add_partial_signature(message, partial1.clone()).unwrap();
         signer1.add_partial_signature(message, partial2.clone()).unwrap();
         
         // Try to combine

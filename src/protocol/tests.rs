@@ -99,6 +99,11 @@ mod hotstuff2_basic_tests {
         
         // Add partial signatures to main signer
         let mut main_signer = ThresholdSigner::new(secret_keys[0].clone(), public_key.clone());
+        
+        // Add the main signer's own partial signature first
+        main_signer.add_partial_signature(message, partial_sigs[0].clone())?;
+        
+        // Then add the other partial signatures
         for partial in partial_sigs.iter().skip(1) {
             main_signer.add_partial_signature(message, partial.clone())?;
         }
@@ -185,14 +190,18 @@ mod hotstuff2_basic_tests {
         
         let tx_data = b"sample transaction data";
         let tx1 = Transaction::new("tx1".to_string(), tx_data.to_vec());
-        let tx2 = Transaction::new("tx2".to_string(), tx_data.to_vec());
+        let tx2 = Transaction::new("tx1".to_string(), tx_data.to_vec()); // Same ID and data
         
-        // Transactions with same data should be equal
+        // Transactions with same ID and data should be equal
         assert_eq!(tx1, tx2);
         
-        // Different transaction data should create different transactions
-        let tx3 = Transaction::new("tx3".to_string(), b"different data".to_vec());
+        // Transactions with different IDs should not be equal even with same data
+        let tx3 = Transaction::new("tx2".to_string(), tx_data.to_vec());
         assert_ne!(tx1, tx3);
+        
+        // Different transaction data should create different transactions
+        let tx4 = Transaction::new("tx1".to_string(), b"different data".to_vec());
+        assert_ne!(tx1, tx4);
         
         println!("✅ Transaction operations verified");
     }

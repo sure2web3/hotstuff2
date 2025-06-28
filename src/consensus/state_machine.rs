@@ -1,5 +1,4 @@
 use std::collections::{HashMap, VecDeque};
-use serde::{Deserialize, Serialize};
 use crate::types::{Block, Hash, QuorumCert, Transaction};
 use crate::error::HotStuffError;
 

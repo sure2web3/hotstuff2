@@ -1,13 +1,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::collections::{HashMap, HashSet};
 
 use crate::crypto::signature::Signable;
 use async_trait::async_trait;
 use dashmap::DashMap;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use parking_lot::RwLock;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use tokio::sync::Mutex;
 
@@ -17,9 +16,9 @@ use crate::consensus::{
     state_machine::StateMachine,
     synchrony::ProductionSynchronyDetector,
 };
-use crate::config::{HotStuffConfig, NetworkConfig};
-use crate::crypto::{KeyPair, PublicKey, Signature};
-use crate::crypto::bls_threshold::{ProductionThresholdSigner as BlsThresholdSigner, ThresholdSignatureManager, BlsSignature};
+use crate::config::HotStuffConfig;
+use crate::crypto::{KeyPair, PublicKey};
+use crate::crypto::bls_threshold::{ProductionThresholdSigner as BlsThresholdSigner, ThresholdSignatureManager};
 use crate::error::HotStuffError;
 use crate::message::consensus::{ConsensusMsg, NewView, Timeout, Vote};
 use crate::message::network::NetworkMsg;
@@ -313,7 +312,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
 
         // Initialize threshold signatures with BLS
         let threshold = (num_nodes * 2 / 3) + 1; // Byzantine threshold
-        let (aggregate_public_key, secret_keys) = BlsThresholdSigner::generate_keys(threshold as usize, num_nodes as usize)
+        let (_aggregate_public_key, secret_keys) = BlsThresholdSigner::generate_keys(threshold as usize, num_nodes as usize)
             .expect("Failed to generate BLS threshold keys");
         
         // Create individual public keys for each node

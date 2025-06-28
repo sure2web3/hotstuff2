@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use futures::StreamExt;
-use log::{debug, error, info};
+use log::{error, info};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};

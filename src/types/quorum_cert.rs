@@ -43,7 +43,7 @@ impl QuorumCert {
         }
 
         // Verify threshold signature if present
-        if let Some(ref threshold_sig) = self.threshold_signature {
+        if let Some(ref _threshold_sig) = self.threshold_signature {
             // TODO: Implement proper BLS signature verification
             return true; // Placeholder - should verify against aggregate public key
         }

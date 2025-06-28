@@ -3,18 +3,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{debug, info, warn};
-use rand::{Rng, SeedableRng};
+use log::{info};
+use rand_core::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 
 use crate::crypto::{BlsSecretKey, BlsSignature, ProductionThresholdSigner};
 use crate::error::HotStuffError;
 use crate::message::consensus::{ConsensusMsg, Vote};
 use crate::network::{P2PNetwork, P2PMessage, MessagePayload};
 use crate::protocol::hotstuff2::HotStuff2;
-use crate::storage::MemoryBlockStore;
+use crate::storage::block_store::MemoryBlockStore;
 use crate::types::{Block, Hash, QuorumCert, Transaction};
 
 /// Types of Byzantine behaviors to simulate
@@ -78,7 +78,7 @@ impl ByzantineNode {
             behavior,
             legitimate_node,
             message_delay_queue: Arc::new(Mutex::new(Vec::new())),
-            rng: Arc::new(Mutex::new(ChaCha20Rng::from_seed([node_id as u8; 32]))),
+            rng: Arc::new(Mutex::new(ChaCha20Rng::seed_from_u64(node_id))),
         }
     }
     
@@ -110,19 +110,39 @@ impl ByzantineNode {
                 self.force_view_change(message).await
             }
             ByzantineBehavior::Combined(behaviors) => {
+                // For combined behaviors, apply each behavior sequentially
+                // but without recursion to avoid boxing issues
                 let mut result = vec![message];
                 for behavior in behaviors {
-                    let temp_node = ByzantineNode {
-                        node_id: self.node_id,
-                        behavior: behavior.clone(),
-                        legitimate_node: Arc::clone(&self.legitimate_node),
-                        message_delay_queue: Arc::clone(&self.message_delay_queue),
-                        rng: Arc::clone(&self.rng),
-                    };
-                    
                     let mut new_result = Vec::new();
                     for msg in result {
-                        new_result.extend(temp_node.process_outgoing_message(msg).await);
+                        match behavior {
+                            ByzantineBehavior::Equivocation => {
+                                new_result.extend(self.create_equivocating_messages(msg).await);
+                            }
+                            ByzantineBehavior::ConflictingVotes => {
+                                new_result.extend(self.create_conflicting_votes(msg).await);
+                            }
+                            ByzantineBehavior::InvalidSignatures => {
+                                new_result.extend(self.corrupt_signatures(msg).await);
+                            }
+                            ByzantineBehavior::MessageDelay(delay) => {
+                                new_result.extend(self.delay_message(msg, *delay).await);
+                            }
+                            ByzantineBehavior::MessageDrop(rate) => {
+                                new_result.extend(self.drop_messages(msg, *rate).await);
+                            }
+                            ByzantineBehavior::CorruptedMessages => {
+                                new_result.extend(self.corrupt_message(msg).await);
+                            }
+                            ByzantineBehavior::ForcedViewChange => {
+                                new_result.extend(self.force_view_change(msg).await);
+                            }
+                            ByzantineBehavior::Combined(_) => {
+                                // Avoid nested combined behaviors to prevent recursion
+                                new_result.push(msg);
+                            }
+                        }
                     }
                     result = new_result;
                 }
@@ -158,7 +178,7 @@ impl ByzantineNode {
             // Always vote for a different block hash
             let mut rng = self.rng.lock().await;
             let mut random_hash = [0u8; 32];
-            rng.fill(&mut random_hash);
+            RngCore::fill_bytes(&mut *rng, &mut random_hash);
             conflicting_vote.block_hash = Hash::from_bytes(&random_hash);
             
             vec![P2PMessage {
@@ -191,7 +211,8 @@ impl ByzantineNode {
     
     async fn drop_messages(&self, message: P2PMessage, drop_rate: f64) -> Vec<P2PMessage> {
         let mut rng = self.rng.lock().await;
-        if rng.gen_bool(drop_rate) {
+        let random_value = RngCore::next_u32(&mut *rng) as f64 / u32::MAX as f64;
+        if random_value < drop_rate {
             vec![] // Drop the message
         } else {
             vec![message]
@@ -202,11 +223,11 @@ impl ByzantineNode {
         let mut rng = self.rng.lock().await;
         
         // Randomly corrupt different parts of the message
-        match rng.gen_range(0..4) {
-            0 => message.id = rng.gen(),
-            1 => message.from = rng.gen(),
-            2 => message.to = rng.gen(),
-            3 => message.timestamp = rng.gen(),
+        match RngCore::next_u32(&mut *rng) % 4 {
+            0 => message.id = RngCore::next_u64(&mut *rng),
+            1 => message.from = RngCore::next_u64(&mut *rng),
+            2 => message.to = RngCore::next_u64(&mut *rng),
+            3 => message.timestamp = RngCore::next_u64(&mut *rng),
             _ => {}
         }
         
@@ -253,7 +274,7 @@ impl ByzantineFaultTestHarness {
         num_byzantine: usize,
         byzantine_behaviors: Vec<ByzantineBehavior>,
     ) -> Result<Self, HotStuffError> {
-        assert!(num_byzantine < num_nodes / 3, "Too many Byzantine nodes for BFT safety");
+        assert!(num_byzantine * 3 < num_nodes, "Too many Byzantine nodes for BFT safety");
         assert_eq!(byzantine_behaviors.len(), num_byzantine, "Must specify behavior for each Byzantine node");
         
         info!("Creating BFT test harness: {} total nodes, {} Byzantine", num_nodes, num_byzantine);
@@ -292,7 +313,7 @@ impl ByzantineFaultTestHarness {
         let start_time = tokio::time::Instant::now();
         
         let mut safety_violations = Vec::new();
-        let mut committed_blocks = HashMap::new();
+        let mut committed_blocks: HashMap<u64, usize> = HashMap::new();
         let mut view_changes = 0;
         let mut message_count = 0;
         
@@ -318,7 +339,7 @@ impl ByzantineFaultTestHarness {
             test_duration,
             byzantine_node_count: self.num_byzantine,
             total_messages: message_count,
-            safety_violations,
+            safety_violations: safety_violations.clone(),
             view_changes,
             consensus_achieved: safety_violations.is_empty(),
         };
@@ -357,7 +378,7 @@ impl ByzantineFaultTestHarness {
         let result = LivenessTestResult {
             test_duration,
             committed_transactions,
-            stalled_periods,
+            stalled_periods: stalled_periods.clone(),
             average_commit_rate: committed_transactions as f64 / test_duration.as_secs() as f64,
             liveness_maintained: stalled_periods.len() < 3, // Allow some temporary stalls
         };
@@ -482,7 +503,7 @@ mod tests {
     async fn test_byzantine_equivocation() {
         // Test that equivocating Byzantine nodes don't break safety
         let behaviors = vec![ByzantineBehavior::Equivocation];
-        let harness = ByzantineFaultTestHarness::new(4, 1, behaviors).await;
+        let _harness = ByzantineFaultTestHarness::new(4, 1, behaviors).await.unwrap();
         
         // Would run actual safety test if we had full implementation
         // let result = harness.test_consensus_safety().await.unwrap();
@@ -493,7 +514,7 @@ mod tests {
     async fn test_byzantine_message_corruption() {
         // Test resilience to corrupted messages
         let behaviors = vec![ByzantineBehavior::CorruptedMessages];
-        let harness = ByzantineFaultTestHarness::new(4, 1, behaviors).await;
+        let _harness = ByzantineFaultTestHarness::new(4, 1, behaviors).await.unwrap();
         
         // Would run actual safety test
     }
@@ -507,7 +528,7 @@ mod tests {
             ByzantineBehavior::MessageDrop(0.2),
         ])];
         
-        let harness = ByzantineFaultTestHarness::new(7, 1, behaviors).await;
+        let _harness = ByzantineFaultTestHarness::new(7, 1, behaviors).await.unwrap();
         
         // Would run comprehensive test suite
     }

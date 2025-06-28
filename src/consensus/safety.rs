@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::types::{Block, Hash, QuorumCert};
 use crate::error::HotStuffError;
 use crate::consensus::ChainView;
@@ -329,7 +328,7 @@ impl SafetyEngine {
     }
 
     /// Check if we can update our lock
-    fn can_update_lock(&self, block: &Block, round: u64) -> bool {
+    fn can_update_lock(&self, _block: &Block, round: u64) -> bool {
         match &self.locked_qc {
             None => true, // No current lock
             Some(locked_qc) => round > locked_qc.height, // Higher round than current lock

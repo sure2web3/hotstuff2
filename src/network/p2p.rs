@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bincode;
-use futures::stream::StreamExt;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

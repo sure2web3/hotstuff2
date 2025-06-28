@@ -1,15 +1,12 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dashmap::DashMap;
-use log::{debug, error, info};
+use log::info;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{sleep, Sleep};
+use tokio::time::sleep;
 
 use crate::error::HotStuffError;
-use crate::message::consensus::Timeout;
-use crate::types::QuorumCert;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TimeoutKey {

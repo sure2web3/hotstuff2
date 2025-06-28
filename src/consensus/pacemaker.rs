@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use crate::error::HotStuffError;
 use crate::types::QuorumCert;
 
