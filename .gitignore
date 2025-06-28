@@ -24,3 +24,5 @@ target/
 .DS_Store
 
 data/
+test_data/
+pending/

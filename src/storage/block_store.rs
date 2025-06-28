@@ -7,6 +7,7 @@ pub trait BlockStore: Send + Sync {
     fn put_block(&self, block: &Block) -> Result<(), HotStuffError>;
     fn get_block(&self, hash: &Hash) -> Result<Option<Block>, HotStuffError>;
     fn has_block(&self, hash: &Hash) -> Result<bool, HotStuffError>;
+    fn get_latest_committed_block(&self) -> Result<Block, HotStuffError>;
 }
 
 pub struct MemoryBlockStore {
@@ -37,6 +38,15 @@ impl BlockStore for MemoryBlockStore {
         let blocks = self.blocks.read().unwrap();
         Ok(blocks.contains_key(hash))
     }
+
+    fn get_latest_committed_block(&self) -> Result<Block, HotStuffError> {
+        let blocks = self.blocks.read().unwrap();
+        blocks
+            .values()
+            .max_by_key(|block| block.height)
+            .cloned()
+            .ok_or(HotStuffError::Storage("No blocks found".to_string()))
+    }
 }
 
 impl<T: BlockStore + ?Sized> BlockStore for Arc<T> {
@@ -50,5 +60,9 @@ impl<T: BlockStore + ?Sized> BlockStore for Arc<T> {
 
     fn has_block(&self, hash: &Hash) -> Result<bool, HotStuffError> {
         (**self).has_block(hash)
+    }
+
+    fn get_latest_committed_block(&self) -> Result<Block, HotStuffError> {
+        (**self).get_latest_committed_block()
     }
 }

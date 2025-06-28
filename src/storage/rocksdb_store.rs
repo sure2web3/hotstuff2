@@ -80,4 +80,29 @@ impl BlockStore for RocksDBStore {
             None => Ok(false),
         }
     }
+
+    fn get_latest_committed_block(&self) -> Result<Block, HotStuffError> {
+        // For simplicity, this implementation scans all blocks
+        // A real implementation would maintain an index of committed blocks
+        let mut latest_block: Option<Block> = None;
+        let mut latest_height = 0u64;
+
+        let iter = self.db.iterator(rocksdb::IteratorMode::Start);
+        for item in iter {
+            let (key, value) = item.map_err(|e| HotStuffError::Storage(e.to_string()))?;
+            
+            if let Ok(key_str) = String::from_utf8(key.to_vec()) {
+                if key_str.starts_with("block:") {
+                    if let Ok(block) = bincode::deserialize::<Block>(&value) {
+                        if block.height > latest_height {
+                            latest_height = block.height;
+                            latest_block = Some(block);
+                        }
+                    }
+                }
+            }
+        }
+
+        latest_block.ok_or(HotStuffError::Storage("No blocks found".to_string()))
+    }
 }

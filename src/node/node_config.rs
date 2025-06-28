@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use crate::message::network::PeerAddr;
-
 #[derive(Clone, Debug)]
 pub struct NodeConfig {
     pub node_id: u64,
     pub listen_addr: String,
-    pub peers: HashMap<u64, String>,
+    pub peers: Vec<(u64, String)>,
     pub data_dir: String,
     pub base_timeout: u64, // Milliseconds
     pub timeout_multiplier: f64,
@@ -19,7 +17,7 @@ impl Default for NodeConfig {
         Self {
             node_id: 0,
             listen_addr: "127.0.0.1:8000".to_string(),
-            peers: HashMap::new(),
+            peers: Vec::new(),
             data_dir: "./data".to_string(),
             base_timeout: 1000, // 1 second
             timeout_multiplier: 1.5,

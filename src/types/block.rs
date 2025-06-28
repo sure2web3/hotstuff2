@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Formatter};
 
-use crate::types::{Hash, Timestamp};
+use crate::types::{Hash, Timestamp, Transaction};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Block {
     pub parent_hash: Hash,
-    pub transactions: Vec<Vec<u8>>,
+    pub transactions: Vec<Transaction>,
     pub height: u64,
     pub proposer_id: u64,
     pub timestamp: Timestamp,
@@ -16,7 +16,7 @@ pub struct Block {
 impl Block {
     pub fn new(
         parent_hash: Hash,
-        transactions: Vec<Vec<u8>>,
+        transactions: Vec<Transaction>,
         height: u64,
         proposer_id: u64,
     ) -> Self {
@@ -28,7 +28,7 @@ impl Block {
         data.extend_from_slice(&timestamp.as_u64().to_be_bytes());
 
         for tx in &transactions {
-            data.extend_from_slice(tx);
+            data.extend_from_slice(&tx.data);
         }
 
         let hash = Hash::from_bytes(&data);

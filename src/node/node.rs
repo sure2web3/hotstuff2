@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::{debug, error, info};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
-use std::sync::Mutex;
-
+use crate::config::HotStuffConfig;
+use crate::consensus::state_machine::KVStateMachine;
 use crate::crypto::KeyPair;
 use crate::error::HotStuffError;
 use crate::message::consensus::ConsensusMsg;
@@ -27,7 +27,7 @@ pub struct Node {
     mempool: Arc<Mempool>,
     hotstuff: Option<Arc<HotStuff2<dyn BlockStore>>>,
     timeout_manager: Arc<TimeoutManager>,
-    running: Mutex<bool>,
+    running: std::sync::Mutex<bool>,
     server_handle: Option<JoinHandle<Result<(), HotStuffError>>>,
     message_sender: mpsc::Sender<(u64, NetworkMsg)>,
 }
@@ -38,15 +38,15 @@ impl Node {
         let mut rng = rand::rng();
         let key_pair = KeyPair::generate(&mut rng);
 
-        // Convert peers map to PeerAddr structs
+        // Convert peers vec to PeerAddr structs
         let peers = config
             .peers
             .iter()
-            .map(|(&id, addr)| {
+            .map(|(id, addr)| {
                 (
-                    id,
+                    *id,
                     PeerAddr {
-                        node_id: id,
+                        node_id: *id,
                         address: addr.clone(),
                     },
                 )
@@ -57,7 +57,7 @@ impl Node {
         let network_client = Arc::new(NetworkClient::new(config.node_id, peers));
 
         // Create message channel
-        let (message_sender, message_receiver) = mpsc::channel(100);
+        let (message_sender, _message_receiver) = mpsc::channel(100);
 
         // Create block store
         let block_store: Arc<dyn BlockStore> = match std::fs::create_dir_all(&config.data_dir) {
@@ -95,7 +95,7 @@ impl Node {
             mempool,
             hotstuff: None,
             timeout_manager,
-            running: Mutex::new(false),
+            running: std::sync::Mutex::new(false),
             server_handle: None,
             message_sender,
         }
@@ -133,6 +133,26 @@ impl Node {
         // Start the timeout manager
         self.timeout_manager.start();
 
+        // Create configuration for HotStuff-2
+        let hotstuff_config = HotStuffConfig {
+            node_id: self.config.node_id,
+            listen_addr: self.config.listen_addr.clone(),
+            peers: self.config.peers.iter().map(|(id, addr)| crate::config::PeerConfig {
+                node_id: *id,
+                address: addr.clone(),
+                public_key: None, // TODO: Add real public keys
+            }).collect(),
+            consensus: crate::config::ConsensusConfig::default(),
+            network: crate::config::NetworkConfig::default(),
+            storage: crate::config::StorageConfig::default(),
+            metrics: crate::config::MetricsConfig::default(),
+            crypto: crate::config::CryptoConfig::default(),
+            logging: crate::config::LoggingConfig::default(),
+        };
+        
+        // Create state machine
+        let state_machine = Arc::new(Mutex::new(KVStateMachine::new()));
+
         // Initialize and start HotStuff-2 protocol
         let hotstuff = HotStuff2::new(
             self.config.node_id,
@@ -141,6 +161,8 @@ impl Node {
             self.block_store.clone(),
             self.timeout_manager.clone(),
             self.config.peers.len() as u64 + 1, // Total nodes including self
+            hotstuff_config,
+            state_machine,
         );
 
         hotstuff.start();
@@ -156,7 +178,7 @@ impl Node {
     }
 
     async fn start_message_handler(&self) -> Result<(), HotStuffError> {
-        let (tx, mut rx) = mpsc::channel::<(u64, NetworkMsg)>(100);
+        let (_tx, mut rx) = mpsc::channel::<(u64, NetworkMsg)>(100);
 
         // Clone necessary fields
         let hotstuff = self.hotstuff.as_ref().unwrap().get_message_sender();
@@ -225,7 +247,11 @@ impl Node {
     }
 
     pub async fn committed_block(&self) -> Option<crate::types::Block> {
-        // TODO: Implement actual logic to get the committed block
-        None
+        // Get the latest committed block from the block store
+        if let Ok(block) = self.block_store.get_latest_committed_block() {
+            Some(block)
+        } else {
+            None
+        }
     }
 }

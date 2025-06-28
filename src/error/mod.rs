@@ -35,9 +35,21 @@ pub enum HotStuffError {
     #[error("Consensus error: {0}")]
     Consensus(String),
 
+    #[error("Crypto error: {0}")]
+    Crypto(String),
+
     #[error("Configuration error: {0}")]
     Configuration(String),
 
     #[error("Metrics error: {0}")]
     Metrics(String),
+
+    #[error("Invalid threshold: {0} out of {1} total nodes")]
+    InvalidThreshold(usize, usize),
+
+    #[error("Invalid signature")]
+    InvalidSignature,
+
+    #[error("Threshold signature combination failed")]
+    ThresholdCombinationFailed,
 }

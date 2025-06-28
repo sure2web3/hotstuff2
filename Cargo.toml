@@ -28,6 +28,20 @@ rocksdb = "0.23.0"
 rand = "0.9.1"
 sha2 = "0.10.8"
 async-trait = "0.1"
+warp = "0.3"
+hex = "0.4"
+toml = "0.8"
+env_logger = "0.11"
+# Real BLS threshold cryptography
+bls12_381 = "0.8"
+group = "0.13"
+ff = "0.13"
+pairing = "0.23"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rand_chacha = "0.3"
+# Additional crypto dependencies for production
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+curve25519-dalek = "4.0"
 
 [features]
 default = []
