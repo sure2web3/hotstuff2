@@ -10,6 +10,7 @@ pub mod types;
 pub mod consensus;
 pub mod metrics;
 pub mod config;
+pub mod testing;
 
 pub use error::HotStuffError;
 pub use node::Node;
