@@ -7,9 +7,13 @@ pub mod reliability;
 pub mod production_manager;
 
 #[cfg(test)]
+pub mod test_utils;
+#[cfg(test)]
 pub mod tests;
 #[cfg(test)]
 pub mod simple_tests;
+#[cfg(test)]
+pub mod optimized_tests;
 
 pub use client::NetworkClient;
 pub use server::NetworkServer;
