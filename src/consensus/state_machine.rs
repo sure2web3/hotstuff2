@@ -317,3 +317,81 @@ impl SafetyRules {
         self.preferred_round
     }
 }
+
+#[cfg(any(test, feature = "byzantine"))]
+/// A simple test state machine for unit tests
+#[derive(Debug, Clone)]
+pub struct TestStateMachine {
+    state: HashMap<String, String>,
+    height: u64,
+    state_hash: Hash,
+}
+
+#[cfg(any(test, feature = "byzantine"))]
+impl TestStateMachine {
+    pub fn new() -> Self {
+        Self {
+            state: HashMap::new(),
+            height: 0,
+            state_hash: Hash::zero(),
+        }
+    }
+
+    fn compute_state_hash(&self) -> Hash {
+        // Simple deterministic hash computation for testing
+        let mut keys: Vec<_> = self.state.keys().collect();
+        keys.sort();
+        let state_str = keys.iter()
+            .map(|k| format!("{}:{}", k, self.state[*k]))
+            .collect::<Vec<_>>()
+            .join(",");
+        Hash::from_bytes(format!("{}:{}", self.height, state_str).as_bytes())
+    }
+}
+
+#[cfg(any(test, feature = "byzantine"))]
+#[async_trait::async_trait]
+impl StateMachine for TestStateMachine {
+    fn execute_block(&mut self, block: &Block) -> Result<Hash, HotStuffError> {
+        for tx in &block.transactions {
+            // Parse transaction data as simple "key=value" format
+            let tx_str = String::from_utf8_lossy(&tx.data);
+            if let Some((key, value)) = tx_str.split_once('=') {
+                self.state.insert(key.trim().to_string(), value.trim().to_string());
+            } else {
+                // Fall back to using transaction ID as key
+                self.state.insert(tx.id.clone(), tx_str.to_string());
+            }
+        }
+        self.height = block.height;
+        self.state_hash = self.compute_state_hash();
+        Ok(self.state_hash)
+    }
+
+    async fn apply_transaction(&mut self, transaction: Transaction) -> Result<(), HotStuffError> {
+        // Parse transaction data as simple "key=value" format
+        let tx_str = String::from_utf8_lossy(&transaction.data);
+        if let Some((key, value)) = tx_str.split_once('=') {
+            self.state.insert(key.trim().to_string(), value.trim().to_string());
+        } else {
+            // Fall back to using transaction ID as key
+            self.state.insert(transaction.id.clone(), tx_str.to_string());
+        }
+        Ok(())
+    }
+
+    fn state_hash(&self) -> Hash {
+        self.state_hash
+    }
+
+    fn height(&self) -> u64 {
+        self.height
+    }
+
+    fn reset_to_state(&mut self, state_hash: Hash, height: u64) -> Result<(), HotStuffError> {
+        self.state.clear();
+        self.height = height;
+        self.state_hash = state_hash;
+        Ok(())
+    }
+}

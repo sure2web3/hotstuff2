@@ -46,6 +46,7 @@ curve25519-dalek = "4.0"
 [features]
 default = []
 metrics = ["prometheus"]  # Reference the crate name, not "dependency"   
+byzantine = []  # Feature to enable Byzantine testing components   
 
 [[bin]]
 name = "hotstuff2"

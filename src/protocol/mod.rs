@@ -25,8 +25,11 @@ mod benchmarks;
 mod integration_working;
 
 // Byzantine fault tolerance tests
+#[cfg(any(test, feature = "byzantine"))]
+pub mod byzantine_tests;
+
 #[cfg(test)]
-mod byzantine_tests;
+pub mod minimal_byzantine_test;
 
 // Comprehensive tests for all HotStuff-2 features
 #[cfg(test)]

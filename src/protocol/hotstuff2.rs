@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicBool};
 
 use crate::crypto::signature::Signable;
 use async_trait::async_trait;
@@ -503,6 +505,134 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
 }
 
 impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
+    #[cfg(any(test, feature = "byzantine"))]
+    /// Create a simplified HotStuff2 instance for testing
+    pub fn new_for_testing(node_id: u64, block_store: Arc<B>) -> Arc<Self> {
+        use crate::consensus::state_machine::TestStateMachine;
+        
+        let key_pair = KeyPair::generate(&mut rand::rng());
+        let mut peers = HashMap::new();
+        // Create a proper PeerAddr entry for testing
+        peers.insert(0, crate::message::network::PeerAddr {
+            node_id: 0,
+            address: "127.0.0.1:8000".to_string(),
+        });
+        let network_client = Arc::new(NetworkClient::new(node_id, peers));
+        let timeout_manager = TimeoutManager::new(
+            Duration::from_secs(10), 
+            2.0
+        );
+        let state_machine: Arc<Mutex<dyn StateMachine>> = 
+            Arc::new(Mutex::new(TestStateMachine::new()));
+
+        let f = 1; // Simplified for testing
+        let (message_sender, message_receiver) = tokio::sync::mpsc::channel(100);
+        
+        // Initialize leader election with minimal nodes
+        let nodes = vec![0, 1, 2, 3];
+        let leader_election = LeaderElection::new(0, &nodes);
+
+        // Initialize test modules
+        let pacemaker = Arc::new(Mutex::new(Pacemaker::new(
+            Duration::from_millis(1000),
+            2.0,
+        )));
+
+        let safety_engine = Arc::new(Mutex::new(SafetyEngine::new()));
+        let metrics = Arc::new(MetricsCollector::new());
+
+        // Initialize threshold signatures with simple test setup
+        let threshold = 3; // Simple threshold for testing
+        let num_nodes = 4;
+        let (_aggregate_public_key, secret_keys) = BlsThresholdSigner::generate_keys(threshold, num_nodes)
+            .expect("Failed to generate BLS threshold keys");
+        
+        let mut public_keys = std::collections::HashMap::new();
+        for (i, sk) in secret_keys.iter().enumerate() {
+            public_keys.insert(i as u64, sk.public_key());
+        }
+        
+        let bls_signer = BlsThresholdSigner::new(
+            node_id,
+            threshold,
+            secret_keys.get(node_id as usize).unwrap_or(&secret_keys[0]).clone(),
+            public_keys,
+        ).expect("Failed to create BLS threshold signer");
+        
+        let threshold_signer = Arc::new(Mutex::new(ThresholdSignatureManager::new(bls_signer)));
+
+        // Initialize view
+        let initial_view = View::new(0, nodes[0]); 
+
+        // Initialize synchrony detector
+        let synchrony_params = crate::consensus::synchrony::SynchronyParameters::default();
+        let synchrony_detector = Arc::new(ProductionSynchronyDetector::new(node_id, synchrony_params));
+
+        // Create minimal config for testing
+        let config = HotStuffConfig {
+            consensus: crate::config::ConsensusConfig {
+                optimistic_mode: true,
+                base_timeout_ms: 1000,
+                timeout_multiplier: 2.0,
+                view_change_timeout_ms: 5000,
+                max_transactions_per_block: 100,
+                max_batch_size: 50,
+                batch_timeout_ms: 100,
+                max_block_size: 1024 * 1024, // 1MB
+                byzantine_fault_tolerance: 1,
+                enable_pipelining: true,
+                pipeline_depth: 3,
+                fast_path_timeout_ms: 500,
+                optimistic_threshold: 0.8,
+                synchrony_detection_window: 10,
+                max_network_delay_ms: 1000,
+                latency_variance_threshold_ms: 100,
+                max_view_changes: 10,
+            },
+            ..Default::default()
+        };
+
+        let network: Arc<dyn NetworkInterface> = Arc::new(LegacyNetworkAdapter::new(network_client));
+
+        Arc::new(Self {
+            node_id,
+            key_pair,
+            network,
+            block_store,
+            timeout_manager,
+            pacemaker,
+            safety_engine,
+            state_machine,
+            metrics,
+            config: config.clone(),
+            chain_state: Mutex::new(ChainState::default()),
+            current_view: Mutex::new(initial_view),
+            pipeline: DashMap::new(),
+            votes: DashMap::new(),
+            timeouts: DashMap::new(),
+            synchrony_detector,
+            fast_path_enabled: config.consensus.optimistic_mode,
+            leader_election: RwLock::new(leader_election),
+            view_change_timeout: Duration::from_millis(config.consensus.view_change_timeout_ms),
+            threshold_signer,
+            transaction_pool: {
+                let tx_pool_config = crate::consensus::transaction_pool::TxPoolConfig {
+                    max_pool_size: config.consensus.max_transactions_per_block * 100,
+                    max_batch_size: config.consensus.max_batch_size,
+                    batch_timeout: Duration::from_millis(config.consensus.batch_timeout_ms),
+                    ..Default::default()
+                };
+                Arc::new(ProductionTxPool::new(tx_pool_config))
+            },
+            max_batch_size: config.consensus.max_batch_size,
+            batch_timeout: Duration::from_millis(config.consensus.batch_timeout_ms),
+            message_sender,
+            message_receiver: Mutex::new(Some(message_receiver)),
+            num_nodes: 4,
+            f,
+        })
+    }
+
     async fn handle_message(&self, msg: ConsensusMsg) -> Result<(), HotStuffError> {
         match msg {
             ConsensusMsg::Proposal(proposal) => self.handle_proposal(proposal).await,
