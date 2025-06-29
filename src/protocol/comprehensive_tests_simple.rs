@@ -1,6 +1,6 @@
 use crate::consensus::state_machine::StateMachine;
 use crate::error::HotStuffError;
-use crate::types::{Block, Hash};
+use crate::types::{Block, Hash, Transaction};
 
 /// A simple mock state machine for testing
 #[derive(Debug)]
@@ -18,7 +18,14 @@ impl SimpleMockStateMachine {
     }
 }
 
+#[async_trait::async_trait]
 impl StateMachine for SimpleMockStateMachine {
+    async fn apply_transaction(&mut self, transaction: Transaction) -> Result<(), HotStuffError> {
+        // Simple transaction application - just increment a counter
+        self.executed_blocks.push(transaction.hash());
+        Ok(())
+    }
+
     fn execute_block(&mut self, block: &Block) -> Result<Hash, HotStuffError> {
         // Simple execution - just record that we executed this block
         self.executed_blocks.push(block.hash());

@@ -3,9 +3,13 @@ use crate::types::{Block, Hash, QuorumCert, Transaction};
 use crate::error::HotStuffError;
 
 /// The state machine that executes committed transactions
+#[async_trait::async_trait]
 pub trait StateMachine: Send + Sync {
     /// Execute a block of transactions and return the new state hash
     fn execute_block(&mut self, block: &Block) -> Result<Hash, HotStuffError>;
+    
+    /// Apply a single transaction asynchronously
+    async fn apply_transaction(&mut self, transaction: Transaction) -> Result<(), HotStuffError>;
     
     /// Get the current state hash
     fn state_hash(&self) -> Hash;
@@ -60,6 +64,7 @@ impl KVStateMachine {
     }
 }
 
+#[async_trait::async_trait]
 impl StateMachine for KVStateMachine {
     fn execute_block(&mut self, block: &Block) -> Result<Hash, HotStuffError> {
         // Parse transactions and apply them
@@ -70,6 +75,10 @@ impl StateMachine for KVStateMachine {
         self.height = block.height;
         self.state_hash = self.compute_state_hash();
         Ok(self.state_hash)
+    }
+    
+    async fn apply_transaction(&mut self, transaction: Transaction) -> Result<(), HotStuffError> {
+        self.execute_transaction(&transaction)
     }
 
     fn state_hash(&self) -> Hash {

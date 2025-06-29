@@ -1,6 +1,8 @@
 // Real BLS threshold signatures for production use
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
 use ff::Field;
@@ -206,7 +208,7 @@ impl BlsSecretKey {
     }
 }
 
-/// Production-ready threshold signature scheme
+/// Production-ready threshold signature scheme with enhanced features
 #[derive(Debug, Clone)]
 pub struct ProductionThresholdSigner {
     node_id: u64,
@@ -215,6 +217,11 @@ pub struct ProductionThresholdSigner {
     public_key: BlsPublicKey,
     other_public_keys: HashMap<u64, BlsPublicKey>,
     aggregate_public_key: BlsPublicKey,
+    /// Cache for fast signature verification
+    verification_cache: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
+    /// Performance metrics
+    signature_count: Arc<AtomicU64>,
+    verification_count: Arc<AtomicU64>,
 }
 
 impl ProductionThresholdSigner {
@@ -250,6 +257,9 @@ impl ProductionThresholdSigner {
             public_key,
             other_public_keys,
             aggregate_public_key,
+            verification_cache: Arc::new(Mutex::new(HashMap::new())),
+            signature_count: Arc::new(AtomicU64::new(0)),
+            verification_count: Arc::new(AtomicU64::new(0)),
         })
     }
     
@@ -278,6 +288,7 @@ impl ProductionThresholdSigner {
     
     /// Sign message with threshold signature
     pub fn sign_threshold(&self, message: &[u8]) -> BlsSignature {
+        self.signature_count.fetch_add(1, Ordering::Relaxed);
         self.secret_key.sign(message)
     }
     
@@ -290,6 +301,33 @@ impl ProductionThresholdSigner {
         } else {
             false
         }
+    }
+    
+    /// Verify individual signature with caching for better performance
+    pub fn verify_individual_cached(&self, message: &[u8], signature: &BlsSignature, signer_id: u64) -> bool {
+        // Create cache key
+        let mut cache_key = Vec::new();
+        cache_key.extend_from_slice(message);
+        cache_key.extend_from_slice(&signature.to_bytes());
+        cache_key.extend_from_slice(&signer_id.to_be_bytes());
+        
+        // Check cache first
+        if let Ok(cache) = self.verification_cache.lock() {
+            if let Some(&result) = cache.get(&cache_key) {
+                return result;
+            }
+        }
+        
+        // Perform verification
+        self.verification_count.fetch_add(1, Ordering::Relaxed);
+        let result = self.verify_individual(message, signature, signer_id);
+        
+        // Cache the result
+        if let Ok(mut cache) = self.verification_cache.lock() {
+            cache.insert(cache_key, result);
+        }
+        
+        result
     }
     
     /// Aggregate signatures and verify threshold
@@ -394,6 +432,21 @@ impl ProductionThresholdSigner {
     pub fn aggregate_public_key(&self) -> &BlsPublicKey {
         &self.aggregate_public_key
     }
+    
+    /// Get performance metrics
+    pub fn get_metrics(&self) -> (u64, u64) {
+        (
+            self.signature_count.load(Ordering::Relaxed),
+            self.verification_count.load(Ordering::Relaxed),
+        )
+    }
+    
+    /// Clear verification cache (for memory management)
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.verification_cache.lock() {
+            cache.clear();
+        }
+    }
 }
 
 /// Threshold signature manager for collecting and aggregating signatures
@@ -457,6 +510,15 @@ impl ThresholdSignatureManager {
             }
         }
         Ok(None)
+    }
+    
+    /// Verify a partial signature from a specific node
+    pub fn verify_partial_signature(&self, node_id: u64, message: &[u8], signature: &BlsSignature) -> bool {
+        if let Some(public_key) = self.signer.other_public_keys.get(&node_id) {
+            self.signer.verify_signature(message, signature, public_key)
+        } else {
+            false
+        }
     }
 }
 

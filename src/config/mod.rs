@@ -58,6 +58,10 @@ pub struct ConsensusConfig {
     // Optimistic responsiveness
     pub optimistic_mode: bool,
     pub fast_path_timeout_ms: u64,
+    pub optimistic_threshold: f64, // Confidence threshold for optimistic execution
+    pub synchrony_detection_window: usize,
+    pub max_network_delay_ms: u64,
+    pub latency_variance_threshold_ms: u64,
     
     // View change parameters
     pub view_change_timeout_ms: u64,
@@ -221,6 +225,10 @@ impl Default for ConsensusConfig {
             pipeline_depth: 3,
             optimistic_mode: true,
             fast_path_timeout_ms: 100,
+            optimistic_threshold: 0.8,
+            synchrony_detection_window: 50,
+            max_network_delay_ms: 100,
+            latency_variance_threshold_ms: 50,
             view_change_timeout_ms: 5000,
             max_view_changes: 10,
         }
@@ -418,6 +426,99 @@ impl NodeConfig {
     /// Get the view change timeout as Duration
     pub fn view_change_timeout(&self) -> Duration {
         Duration::from_millis(self.consensus.view_change_timeout_ms)
+    }
+
+    /// Create default config for testing
+    pub fn default_for_testing() -> Self {
+        Self {
+            node_id: 0,
+            listen_addr: "127.0.0.1:8000".to_string(),
+            peers: Vec::new(),
+            consensus: ConsensusConfig {
+                base_timeout_ms: 5000,
+                timeout_multiplier: 1.5,
+                max_block_size: 1024 * 1024,
+                max_transactions_per_block: 1000,
+                max_batch_size: 100,
+                batch_timeout_ms: 1000,
+                byzantine_fault_tolerance: 1,
+                enable_pipelining: true,
+                pipeline_depth: 3,
+                optimistic_mode: true,
+                fast_path_timeout_ms: 1000,
+                optimistic_threshold: 0.66,
+                synchrony_detection_window: 10,
+                max_network_delay_ms: 1000,
+                latency_variance_threshold_ms: 100,
+                view_change_timeout_ms: 10000,
+                max_view_changes: 10,
+            },
+            network: NetworkConfig {
+                use_p2p_network: false,
+                max_peers: 100,
+                connection_timeout_ms: 10000,
+                heartbeat_interval_ms: 5000,
+                max_message_size: 1024 * 1024,
+                max_retries: 3,
+                retry_delay_ms: 1000,
+                exponential_backoff: true,
+                send_buffer_size: 64 * 1024,
+                receive_buffer_size: 64 * 1024,
+                enable_tls: false,
+                tls_cert_path: None,
+                tls_key_path: None,
+            },
+            storage: StorageConfig {
+                data_dir: "/tmp/hotstuff_test".into(),
+                storage_type: StorageType::Memory,
+                rocksdb: RocksDBConfig {
+                    max_open_files: 1000,
+                    write_buffer_size: 64 * 1024 * 1024,
+                    max_write_buffer_number: 3,
+                    compression: "snappy".to_string(),
+                    block_cache_size: 64 * 1024 * 1024,
+                    bloom_filter_bits: 10,
+                },
+                memory_limit_mb: Some(256),
+                enable_wal: false,
+                sync_writes: false,
+                compaction_interval_ms: 300000,
+            },
+            metrics: MetricsConfig {
+                enabled: true,
+                port: 9090,
+                endpoint: "/metrics".to_string(),
+                collection_interval_ms: 1000,
+                retention_days: 7,
+                prometheus_enabled: false,
+                prometheus_port: 9091,
+            },
+            crypto: CryptoConfig {
+                signature_scheme: SignatureScheme::Ed25519,
+                key_size: 256,
+                use_threshold_signatures: true,
+                threshold: Some(2),
+                private_key_path: None,
+                public_key_path: None,
+                keystore_path: None,
+                enable_key_rotation: false,
+                key_rotation_interval_hours: 24,
+            },
+            logging: LoggingConfig {
+                level: "debug".to_string(),
+                output: LogOutput::Console,
+                format: LogFormat::Plain,
+                file_rotation: FileRotationConfig::default(),
+            },
+        }
+    }
+
+    /// Create default config for testing with specific node ID
+    pub fn default_for_testing_with_id(node_id: u64) -> Self {
+        let mut config = Self::default_for_testing();
+        config.node_id = node_id;
+        config.listen_addr = format!("127.0.0.1:{}", 8000 + node_id);
+        config
     }
 }
 

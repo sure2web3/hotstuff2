@@ -14,6 +14,12 @@ mod simple_production_tests;
 #[cfg(test)]
 mod integration_tests;
 
+#[cfg(test)]
+mod optimistic_tests;
+
+#[cfg(test)]
+mod benchmarks;
+
 // Working integration test showcasing successful features
 #[cfg(test)]
 mod integration_working;
@@ -32,3 +38,6 @@ mod comprehensive_tests_simple;
 // Byzantine fault tolerance tests (disabled by default - need full node setup)
 // #[cfg(test)]
 // mod byzantine_tests;
+
+#[cfg(test)]
+mod basic_integration_test;

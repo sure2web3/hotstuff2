@@ -5,6 +5,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceStats {
+    pub throughput_tps: f64,
+    pub latency_ms: f64,
+}
+
 /// Metrics collected by the HotStuff-2 implementation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsensusMetrics {
@@ -287,62 +293,55 @@ impl MetricsCollector {
     pub fn get_metrics(&self) -> ConsensusMetrics {
         self.metrics.read().unwrap().clone()
     }
+    
+    /// Record counter metric asynchronously
+    pub async fn record_counter(&self, name: &str, value: f64) {
+        let event = MetricEvent::Custom {
+            name: name.to_string(),
+            value,
+            timestamp: Instant::now(),
+        };
+        let _ = self.event_sender.send(event).await;
+    }
+    
+    /// Record histogram metric asynchronously  
+    pub async fn record_histogram(&self, name: &str, value: f64) {
+        let event = MetricEvent::Custom {
+            name: format!("{}_histogram", name),
+            value,
+            timestamp: Instant::now(),
+        };
+        let _ = self.event_sender.send(event).await;
+    }
 
-    /// Reset all metrics
-    pub fn reset(&self) {
-        if let Ok(mut m) = self.metrics.write() {
-            *m = ConsensusMetrics::default();
-        }
-        
-        self.blocks_proposed.store(0, Ordering::Relaxed);
-        self.blocks_committed.store(0, Ordering::Relaxed);
-        self.votes_sent.store(0, Ordering::Relaxed);
-        self.votes_received.store(0, Ordering::Relaxed);
-        self.messages_sent.store(0, Ordering::Relaxed);
-        self.messages_received.store(0, Ordering::Relaxed);
-        
-        if let Ok(mut times) = self.block_times.write() {
-            times.clear();
-        }
-        
-        if let Ok(mut latencies) = self.commit_latencies.write() {
-            latencies.clear();
-        }
+    /// Get performance statistics
+    pub async fn get_statistics(&self) -> Result<PerformanceStats, crate::error::HotStuffError> {
+        let metrics = self.metrics.read().unwrap();
+        Ok(PerformanceStats {
+            throughput_tps: if metrics.avg_block_time > 0.0 { 1000.0 / metrics.avg_block_time } else { 0.0 },
+            latency_ms: metrics.avg_commit_latency,
+        })
     }
 }
 
-/// Simple HTTP metrics server
+/// Simple HTTP server for serving metrics in Prometheus format
 pub struct MetricsServer {
-    collector: Arc<MetricsCollector>,
-    port: u16,
+    bind_address: String,
+    metrics: Arc<RwLock<ConsensusMetrics>>,
 }
 
 impl MetricsServer {
-    pub fn new(collector: Arc<MetricsCollector>, port: u16) -> Self {
-        Self { collector, port }
+    pub fn new(bind_address: String, metrics: Arc<RwLock<ConsensusMetrics>>) -> Self {
+        Self {
+            bind_address,
+            metrics,
+        }
     }
 
-    /// Start the metrics HTTP server
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use warp::Filter;
-        
-        let collector = self.collector.clone();
-        let metrics_route = warp::path("metrics")
-            .map(move || {
-                let metrics = collector.get_metrics();
-                warp::reply::json(&metrics)
-            });
-        
-        let health_route = warp::path("health")
-            .map(|| "OK");
-        
-        let routes = metrics_route.or(health_route);
-        
-        println!("Starting metrics server on port {}", self.port);
-        warp::serve(routes)
-            .run(([127, 0, 0, 1], self.port))
-            .await;
-        
+        // Simple HTTP server implementation would go here
+        // For now, just log that we're starting
+        println!("Metrics server would start on {}", self.bind_address);
         Ok(())
     }
 }

@@ -85,6 +85,10 @@ mod working_integration_tests {
             pipeline_depth: 3,
             optimistic_mode: true, // HotStuff-2 optimistic responsiveness
             fast_path_timeout_ms: 100,
+            optimistic_threshold: 0.8,
+            synchrony_detection_window: 50,
+            max_network_delay_ms: 100,
+            latency_variance_threshold_ms: 50,
             view_change_timeout_ms: 30000,
             max_view_changes: 10,
         };
