@@ -263,21 +263,27 @@ impl ProductionThresholdSigner {
         })
     }
     
-    /// Generate distributed keys for threshold signatures (for testing/setup)
+    /// Generate distributed keys for threshold signatures
     /// Returns (aggregate_public_key, individual_secret_keys)
-    pub fn generate_keys(_threshold: usize, num_nodes: usize) -> Result<(BlsPublicKey, Vec<BlsSecretKey>), HotStuffError> {
-        // Temporarily disabled key generation due to rand version conflicts
-        // We'll use mock keys for now
-        let mut secret_keys = Vec::new();
-        let mut public_keys = Vec::new();
+    pub fn generate_keys(threshold: usize, num_nodes: usize) -> Result<(BlsPublicKey, Vec<BlsSecretKey>), HotStuffError> {
+        if threshold == 0 || threshold > num_nodes {
+            return Err(HotStuffError::InvalidThreshold(threshold, num_nodes));
+        }
         
-        // Generate mock keys for testing
+        use rand_chacha::ChaCha20Rng;
+        use rand_core::SeedableRng;
+        let mut rng = ChaCha20Rng::from_seed([0u8; 32]);
+        
+        let mut secret_keys = Vec::with_capacity(num_nodes);
+        let mut public_keys = Vec::with_capacity(num_nodes);
+        
+        // Generate individual keys for each node
         for _ in 0..num_nodes {
-            // Create dummy keys for compilation - replace with proper key generation
-            let sk = BlsSecretKey::from_bytes(&[1u8; 32]).map_err(|_| HotStuffError::Crypto("Mock key generation failed".to_string()))?;
-            let pk = sk.public_key();
-            secret_keys.push(sk);
-            public_keys.push(pk);
+            let secret_key = BlsSecretKey::generate(&mut rng);
+            let public_key = secret_key.public_key();
+            
+            secret_keys.push(secret_key);
+            public_keys.push(public_key);
         }
         
         // Aggregate public key for threshold verification
@@ -470,12 +476,17 @@ impl ThresholdSignatureManager {
     }
     
     /// Add a partial signature to the collection
-    pub fn add_partial_signature(&mut self, message: &[u8], signature: BlsSignature) -> Result<(), HotStuffError> {
+    pub fn add_partial_signature(&mut self, message: &[u8], node_id: u64, signature: BlsSignature) -> Result<(), HotStuffError> {
         let message_hash = message.to_vec();
         let entry = self.signature_cache.entry(message_hash).or_insert_with(Vec::new);
         
-        // Add signature with our node ID (we generated it)
-        entry.push((self.signer.node_id, signature));
+        // Check for duplicate signatures from the same node
+        if entry.iter().any(|(id, _)| *id == node_id) {
+            return Ok(()); // Ignore duplicate signatures
+        }
+        
+        // Add signature with the provided node ID
+        entry.push((node_id, signature));
         Ok(())
     }
     
@@ -519,6 +530,11 @@ impl ThresholdSignatureManager {
         } else {
             false
         }
+    }
+
+    /// Get the underlying BLS signer for accessing aggregate public key
+    pub fn get_signer(&self) -> &ProductionThresholdSigner {
+        &self.signer
     }
 }
 

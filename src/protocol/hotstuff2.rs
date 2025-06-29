@@ -607,8 +607,13 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
     }
 
     async fn send_vote(&self, block: &Block) -> Result<(), HotStuffError> {
-        // Sign the block hash
+        // Sign the block hash with traditional signature for compatibility
         let signature = self.key_pair.sign(block.hash().as_bytes())?;
+
+        // Create BLS partial signature for efficient threshold aggregation
+        let threshold_signer = self.threshold_signer.lock().await;
+        let partial_signature = threshold_signer.sign_partial(block.hash().as_bytes())?;
+        drop(threshold_signer);
 
         let vote = Vote {
             block_hash: block.hash(),
@@ -616,7 +621,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
             view: self.current_view.lock().await.number,
             sender_id: self.node_id,
             signature,
-            partial_signature: None, // Will be enhanced later
+            partial_signature: Some(partial_signature),
         };
 
         // Broadcast the vote
@@ -684,36 +689,37 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
             let vote_height = vote.height;
             let vote_block_hash = vote.block_hash;
             
-            // Create partial signature for threshold aggregation
-            let threshold_signer = self.threshold_signer.lock().await;
-            let partial_sig = threshold_signer.sign_partial(vote_block_hash.as_bytes())?;
-            drop(threshold_signer);
-            
-            stage.votes.push(vote);
+            // Add the vote to the stage
+            stage.votes.push(vote.clone());
 
-            // Try to aggregate threshold signatures
-            let mut threshold_signer = self.threshold_signer.lock().await;
-            threshold_signer.add_partial_signature(vote_block_hash.as_bytes(), partial_sig)?;
-            if threshold_signer.has_threshold_signatures(vote_block_hash.as_bytes()) {
-                let available_signers = threshold_signer.get_available_signers(vote_block_hash.as_bytes());
-                if let Some(threshold_sig) = threshold_signer.try_combine(vote_block_hash.as_bytes(), &available_signers)? {
-                    info!("Formed threshold signature for block {} at height {}", vote_block_hash, vote_height);
-                    
-                    // Create QC with threshold signature
-                    let qc = QuorumCert::new_with_threshold_sig(
-                        vote_block_hash,
-                        vote_height,
-                        threshold_sig,
-                    );
+            // If this vote has a BLS partial signature, try to aggregate threshold signatures
+            if let Some(partial_sig) = &vote.partial_signature {
+                let mut threshold_signer = self.threshold_signer.lock().await;
+                
+                // Add the partial signature from the vote with the sender's node ID
+                threshold_signer.add_partial_signature(vote_block_hash.as_bytes(), vote.sender_id, partial_sig.clone())?;
+                
+                if threshold_signer.has_threshold_signatures(vote_block_hash.as_bytes()) {
+                    let available_signers = threshold_signer.get_available_signers(vote_block_hash.as_bytes());
+                    if let Some(threshold_sig) = threshold_signer.try_combine(vote_block_hash.as_bytes(), &available_signers)? {
+                        info!("Formed threshold signature for block {} at height {}", vote_block_hash, vote_height);
+                        
+                        // Create QC with threshold signature
+                        let qc = QuorumCert::new_with_threshold_sig(
+                            vote_block_hash,
+                            vote_height,
+                            threshold_sig,
+                        );
 
-                    stage.qc = Some(qc.clone());
-                    stage.phase = Phase::Commit;
+                        stage.qc = Some(qc.clone());
+                        stage.phase = Phase::Commit;
 
-                    // Process the QC
-                    self.process_two_phase_qc(qc).await?;
+                        // Process the QC
+                        self.process_two_phase_qc(qc).await?;
 
-                    // Clear votes to save memory
-                    stage.votes.clear();
+                        // Clear votes to save memory
+                        stage.votes.clear();
+                    }
                 }
             } else if stage.votes.len() >= (self.num_nodes - self.f) as usize {
                 // Fallback to traditional QC formation if threshold signatures aren't ready
@@ -1086,14 +1092,17 @@ async fn process_vote_with_bft_checks(&self, vote: Vote) -> Result<(), HotStuffE
 
 /// Verify vote signature using threshold signatures
 async fn verify_vote_signature(&self, vote: &Vote) -> Result<bool, HotStuffError> {
-    if let Some(_signature) = &vote.partial_signature {
-        // For now, return true - in production this would verify the BLS signature
-        // let signer = self.threshold_signer.lock().await;
-        // let message = format!("{}:{}:{}", vote.view, vote.height, vote.block_hash);
-        // return signer.verify_partial_signature(vote.sender_id, message.as_bytes(), signature);
-        return Ok(true);
+    if let Some(signature) = &vote.partial_signature {
+        // Verify the BLS partial signature
+        let threshold_signer = self.threshold_signer.lock().await;
+        let message = vote.block_hash.as_bytes();
+        let result = threshold_signer.verify_partial_signature(vote.sender_id, message, signature);
+        Ok(result)
+    } else {
+        // Fallback to traditional signature verification
+        // TODO: Implement traditional signature verification if needed
+        Ok(false)
     }
-    Ok(false)
 }
 
 /// Detect Byzantine double voting behavior
