@@ -51,7 +51,7 @@ mod simple_production_tests {
         println!("🧪 Testing Basic Node Creation");
         
         let node = create_simple_test_node(0, 4).await?;
-        let stats = node.get_performance_stats().await;
+        let stats = node.get_performance_statistics().await.unwrap();
         
         assert_eq!(stats.current_height, 0, "Should start at height 0");
         assert_eq!(stats.current_view, 0, "Should start at view 0");
@@ -117,10 +117,10 @@ mod simple_production_tests {
                 format!("tx_{}", i),
                 format!("data_{}", i).into_bytes(),
             );
-            node.add_transaction(tx).await?;
+            node.submit_transaction(tx).await?;
         }
         
-        let stats = node.get_performance_stats().await;
+        let stats = node.get_performance_statistics().await.unwrap();
         assert!(stats.pending_transactions > 0, "Should have pending transactions");
         
         println!("✅ Transaction handling test passed with {} transactions", 
@@ -142,7 +142,7 @@ mod simple_production_tests {
         
         // Verify all nodes are created correctly
         for (i, node) in nodes.iter().enumerate() {
-            let stats = node.get_performance_stats().await;
+            let stats = node.get_performance_statistics().await.unwrap();
             assert_eq!(stats.current_height, 0);
             assert_eq!(stats.current_view, 0);
             println!("Node {} created successfully", i);
@@ -158,7 +158,7 @@ mod simple_production_tests {
         println!("🧪 Testing Performance Statistics");
         
         let node = create_simple_test_node(0, 4).await?;
-        let stats = node.get_performance_stats().await;
+        let stats = node.get_performance_statistics().await.unwrap();
         
         // Test initial stats
         assert_eq!(stats.current_height, 0);
@@ -191,7 +191,7 @@ mod simple_production_tests {
                 num_nodes, expected_f, f);
             
             let node = create_simple_test_node(0, num_nodes).await?;
-            let stats = node.get_performance_stats().await;
+            let stats = node.get_performance_statistics().await.unwrap();
             assert_eq!(stats.current_height, 0);
         }
         
@@ -267,13 +267,13 @@ mod simple_production_tests {
                     format!("node_{}_tx_{}", node_idx, i),
                     format!("SET key_{} value_{}", node_idx * 1000 + i, node_idx * 1000 + i).into_bytes(),
                 );
-                node.add_transaction(tx).await?;
+                node.submit_transaction(tx).await?;
             }
         }
         
         // Verify state
         for (node_idx, node) in nodes.iter().enumerate() {
-            let stats = node.get_performance_stats().await;
+            let stats = node.get_performance_statistics().await.unwrap();
             assert!(stats.pending_transactions > 0, 
                 "Node {} should have pending transactions", node_idx);
             println!("Node {}: {} pending transactions", 

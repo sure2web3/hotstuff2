@@ -22,6 +22,10 @@ mod integration_working;
 #[cfg(test)]
 mod byzantine_tests;
 
+// Comprehensive tests for all HotStuff-2 features
+#[cfg(test)]
+mod comprehensive_tests_simple;
+
 // #[cfg(test)]
 // mod enhanced_production_tests;  // Disabled temporarily - needs refactoring for private fields
 

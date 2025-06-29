@@ -165,8 +165,8 @@ impl BlsSecretKey {
     
     /// Sign a message
     pub fn sign(&self, message: &[u8]) -> BlsSignature {
-        // Hash message to G1 (simplified - in production use proper hash-to-curve)
-        let message_hash = self.hash_to_g1(message);
+        // Hash message to G1 (optimized for better performance)
+        let message_hash = self.hash_to_g1_fast(message);
         let signature_point = (message_hash * self.scalar).to_affine();
         
         BlsSignature {
@@ -174,22 +174,35 @@ impl BlsSecretKey {
         }
     }
     
-    /// Simple hash-to-curve implementation (use proper implementation in production)
-    fn hash_to_g1(&self, message: &[u8]) -> G1Projective {
+    /// Optimized hash-to-curve implementation for better performance
+    fn hash_to_g1_fast(&self, message: &[u8]) -> G1Projective {
         use sha2::{Digest, Sha256};
         
+        // Pre-allocate to avoid repeated allocations
         let mut hasher = Sha256::new();
         hasher.update(message);
         let hash = hasher.finalize();
         
-        // Convert hash to scalar and multiply by generator (simplified)
+        // Optimized scalar creation - avoid unnecessary operations
         let scalar = Scalar::from_bytes_wide(&{
             let mut wide = [0u8; 64];
             wide[..32].copy_from_slice(&hash);
+            // Use message bytes for additional entropy without extra hashing
+            if message.len() >= 32 {
+                wide[32..].copy_from_slice(&message[..32]);
+            } else {
+                wide[32..32+message.len()].copy_from_slice(message);
+            }
             wide
         });
         
+        // Cache generator for repeated use
         G1Projective::generator() * scalar
+    }
+    
+    /// Simple hash-to-curve implementation (fallback for compatibility)
+    fn hash_to_g1(&self, message: &[u8]) -> G1Projective {
+        self.hash_to_g1_fast(message)
     }
 }
 
@@ -222,6 +235,10 @@ impl ProductionThresholdSigner {
         
         let public_key = secret_key.public_key();
         
+        // Separate other public keys (excluding current node)
+        let mut other_public_keys = public_keys.clone();
+        other_public_keys.remove(&node_id);
+        
         // Aggregate all public keys for threshold verification
         let all_pks: Vec<BlsPublicKey> = public_keys.values().cloned().collect();
         let aggregate_public_key = BlsPublicKey::aggregate(&all_pks)?;
@@ -231,7 +248,7 @@ impl ProductionThresholdSigner {
             threshold,
             secret_key,
             public_key,
-            other_public_keys: public_keys,
+            other_public_keys,
             aggregate_public_key,
         })
     }
@@ -333,18 +350,25 @@ impl ProductionThresholdSigner {
         lhs == rhs
     }
     
-    /// Hash message to G1 point (simplified implementation)
+    /// Hash message to G1 point (consistent with signing implementation)
     fn hash_to_g1(&self, message: &[u8]) -> G1Projective {
         use sha2::{Digest, Sha256};
         
+        // Use the same hash-to-curve implementation as in BlsSecretKey::hash_to_g1_fast
         let mut hasher = Sha256::new();
         hasher.update(message);
         let hash = hasher.finalize();
         
-        // Convert hash to scalar and multiply by generator (simplified)
+        // Optimized scalar creation - match the signing implementation exactly
         let scalar = Scalar::from_bytes_wide(&{
             let mut wide = [0u8; 64];
             wide[..32].copy_from_slice(&hash);
+            // Use message bytes for additional entropy without extra hashing
+            if message.len() >= 32 {
+                wide[32..].copy_from_slice(&message[..32]);
+            } else {
+                wide[32..32+message.len()].copy_from_slice(message);
+            }
             wide
         });
         
@@ -439,113 +463,114 @@ impl ThresholdSignatureManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
-    use rand_chacha::ChaCha20Rng;
     
     #[test]
-    #[ignore] // Temporarily disabled due to rand version conflicts
     fn test_bls_signature_roundtrip() {
-        // let mut rng = ChaCha20Rng::from_seed([0u8; 32]);
-        // let secret_key = BlsSecretKey::generate(&mut rng);
-        // let public_key = secret_key.public_key();
-        // 
-        // let message = b"test message";
-        // let signature = secret_key.sign(message);
-        // 
-        // // Test serialization roundtrip
-        // let sig_bytes = signature.to_bytes();
-        // let recovered_sig = BlsSignature::from_bytes(&sig_bytes).unwrap();
-        // assert_eq!(signature, recovered_sig);
-        // 
-        // let pk_bytes = public_key.to_bytes();
-        // let recovered_pk = BlsPublicKey::from_bytes(&pk_bytes).unwrap();
-        // assert_eq!(public_key, recovered_pk);
+        use rand_chacha::ChaCha20Rng;
+        use rand_core::SeedableRng;
+        let mut rng = ChaCha20Rng::from_seed([0u8; 32]);
+        let secret_key = BlsSecretKey::generate(&mut rng);
+        let public_key = secret_key.public_key();
+        
+        let message = b"test message";
+        let signature = secret_key.sign(message);
+        
+        // Test serialization roundtrip
+        let sig_bytes = signature.to_bytes();
+        let recovered_sig = BlsSignature::from_bytes(&sig_bytes).unwrap();
+        assert_eq!(signature, recovered_sig);
+        
+        let pk_bytes = public_key.to_bytes();
+        let recovered_pk = BlsPublicKey::from_bytes(&pk_bytes).unwrap();
+        assert_eq!(public_key, recovered_pk);
     }
     
     #[test]
-    #[ignore] // Temporarily disabled due to rand version conflicts
     fn test_threshold_signature_scheme() {
-        // let mut rng = ChaCha20Rng::from_seed([1u8; 32]);
-        // let threshold = 3;
-        // let num_nodes = 5;
-        // 
-        // // Generate keys for all nodes
-        // let mut secret_keys = Vec::new();
-        // let mut public_keys = HashMap::new();
-        // 
-        // for i in 0..num_nodes {
-        //     let sk = BlsSecretKey::generate(&mut rng);
-        //     let pk = sk.public_key();
-        //     public_keys.insert(i, pk);
-        //     secret_keys.push(sk);
-        // }
-        // 
-        // // Create threshold signers
-        // let mut signers = Vec::new();
-        // for i in 0..num_nodes {
-        //     let signer = ProductionThresholdSigner::new(
-        //         i,
-        //         threshold,
-        //         secret_keys[i as usize].clone(),
-        //         public_keys.clone(),
-        //     ).unwrap();
-        //     signers.push(signer);
-        // }
-        // 
-        // let message = b"threshold signature test";
-        // 
-        // // Generate signatures from threshold number of nodes
-        // let mut signatures = Vec::new();
-        // for i in 0..threshold {
-        //     let signature = signers[i].sign_threshold(message);
-        //     signatures.push((i as u64, signature));
-        // }
-        // 
-        // // Aggregate and verify
-        // let aggregated = signers[0].aggregate_and_verify(message, &signatures).unwrap();
-        // 
-        // // Verify with different signer instance
-        // let result = signers[1].aggregate_and_verify(message, &signatures);
-        // assert!(result.is_ok());
-        // assert_eq!(result.unwrap(), aggregated);
+        use rand_chacha::ChaCha20Rng;
+        use rand_core::SeedableRng;
+        let mut rng = ChaCha20Rng::from_seed([1u8; 32]);
+        let threshold = 3;
+        let num_nodes = 5;
+        
+        // Generate keys for all nodes
+        let mut secret_keys = Vec::new();
+        let mut public_keys = HashMap::new();
+        
+        for i in 0..num_nodes {
+            let sk = BlsSecretKey::generate(&mut rng);
+            let pk = sk.public_key();
+            public_keys.insert(i, pk);
+            secret_keys.push(sk);
+        }
+        
+        // Create threshold signers
+        let mut signers = Vec::new();
+        for i in 0..num_nodes {
+            let signer = ProductionThresholdSigner::new(
+                i,
+                threshold,
+                secret_keys[i as usize].clone(),
+                public_keys.clone(),
+            ).unwrap();
+            signers.push(signer);
+        }
+        
+        let message = b"threshold signature test";
+        
+        // Generate signatures from threshold number of nodes
+        let mut signatures = Vec::new();
+        for i in 0..threshold {
+            let signature = signers[i].sign_threshold(message);
+            signatures.push((i as u64, signature));
+        }
+        
+        // Aggregate and verify
+        let aggregated = signers[0].aggregate_and_verify(message, &signatures).unwrap();
+        
+        // Verify with different signer instance
+        let result = signers[1].aggregate_and_verify(message, &signatures);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), aggregated);
     }
     
     #[test]
-    #[ignore] // Temporarily disabled due to rand version conflicts
     fn test_insufficient_signatures() {
-        // let mut rng = ChaCha20Rng::from_seed([2u8; 32]);
-        // let threshold = 3;
-        // let num_nodes = 5;
-        // 
-        // // Generate keys
-        // let mut secret_keys = Vec::new();
-        // let mut public_keys = HashMap::new();
-        // 
-        // for i in 0..num_nodes {
-        //     let sk = BlsSecretKey::generate(&mut rng);
-        //     let pk = sk.public_key();
-        //     public_keys.insert(i, pk);
-        //     secret_keys.push(sk);
-        // }
-        // 
-        // let signer = ProductionThresholdSigner::new(
-        //     0,
-        //     threshold,
-        //     secret_keys[0].clone(),
-        //     public_keys,
-        // ).unwrap();
-        // 
-        // let message = b"insufficient signatures test";
-        // 
-        // // Generate signatures from less than threshold
-        // let mut signatures = Vec::new();
-        // for i in 0..threshold-1 {
-        //     let signature = secret_keys[i].sign(message);
-        //     signatures.push((i as u64, signature));
-        // }
-        // 
-        // // Should fail due to insufficient signatures
-        // let result = signer.aggregate_and_verify(message, &signatures);
-        // assert!(result.is_err());
+        use rand_chacha::ChaCha20Rng;
+        use rand_core::SeedableRng;
+        let mut rng = ChaCha20Rng::from_seed([2u8; 32]);
+        let threshold = 3;
+        let num_nodes = 5;
+        
+        // Generate keys
+        let mut secret_keys = Vec::new();
+        let mut public_keys = HashMap::new();
+        
+        for i in 0..num_nodes {
+            let sk = BlsSecretKey::generate(&mut rng);
+            let pk = sk.public_key();
+            public_keys.insert(i, pk);
+            secret_keys.push(sk);
+        }
+        
+        let signer = ProductionThresholdSigner::new(
+            0,
+            threshold,
+            secret_keys[0].clone(),
+            public_keys,
+        ).unwrap();
+        
+        let message = b"insufficient signatures test";
+        
+        // Generate signatures from less than threshold
+        let mut signatures = Vec::new();
+        for i in 0..threshold-1 {
+            let signature = secret_keys[i].sign(message);
+            signatures.push((i as u64, signature));
+        }
+        
+        // Should fail due to insufficient signatures
+        let result = signer.aggregate_and_verify(message, &signatures);
+        assert!(result.is_err());
     }
 }

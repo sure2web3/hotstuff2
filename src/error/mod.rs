@@ -50,6 +50,9 @@ pub enum HotStuffError {
     #[error("Invalid signature")]
     InvalidSignature,
 
+    #[error("Invalid transaction: {0}")]
+    InvalidTransaction(String),
+
     #[error("Threshold signature combination failed")]
     ThresholdCombinationFailed,
 }
