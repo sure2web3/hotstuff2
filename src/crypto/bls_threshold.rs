@@ -531,6 +531,36 @@ impl ThresholdSignatureManager {
     pub fn get_signer(&self) -> &ProductionThresholdSigner {
         &self.signer
     }
+    
+    /// Get the aggregate public key for verification
+    pub fn get_aggregate_public_key(&self) -> Result<BlsPublicKey, HotStuffError> {
+        self.signer.get_aggregate_public_key()
+    }
+    
+    /// Clear old signatures from cache (cleanup)
+    pub fn cleanup_old_signatures(&mut self, max_cache_size: usize) {
+        if self.signature_cache.len() > max_cache_size {
+            // Simple cleanup: remove random entries (could be improved with LRU)
+            let excess_count = self.signature_cache.len() - max_cache_size;
+            let keys_to_remove: Vec<_> = self.signature_cache
+                .keys()
+                .take(excess_count)
+                .cloned()
+                .collect();
+            
+            for key in keys_to_remove {
+                self.signature_cache.remove(&key);
+            }
+        }
+    }
+}
+
+impl ProductionThresholdSigner {
+    /// Get the aggregate public key
+    pub fn get_aggregate_public_key(&self) -> Result<BlsPublicKey, HotStuffError> {
+        // Return the precomputed aggregate public key
+        Ok(self.aggregate_public_key.clone())
+    }
 }
 
 #[cfg(test)]

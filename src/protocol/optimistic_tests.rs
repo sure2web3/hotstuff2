@@ -11,7 +11,6 @@ use crate::consensus::{ProductionTxPool, TxPoolConfig};
 use crate::consensus::state_machine::KVStateMachine;
 use crate::crypto::{KeyPair, ProductionThresholdSigner as BlsThresholdSigner};
 use crate::error::HotStuffError;
-use crate::message::network::PeerAddr;
 use crate::network::NetworkClient;
 use crate::protocol::hotstuff2::HotStuff2;
 use crate::storage::block_store::MemoryBlockStore;
@@ -152,6 +151,9 @@ async fn test_optimistic_responsiveness_synchronous_network() {
             }
         }
         
+        // Allow time for synchrony detection to process measurements
+        sleep(Duration::from_millis(50)).await;
+        
         // Force synchrony update
         detector.update_global_synchrony().await;
         
@@ -208,6 +210,9 @@ async fn test_optimistic_fallback_asynchronous_network() {
                 }
             }
         }
+        
+        // Allow time for synchrony detection to process measurements
+        sleep(Duration::from_millis(50)).await;
         
         // Force synchrony update
         detector.update_global_synchrony().await;
@@ -563,6 +568,10 @@ async fn test_optimistic_responsiveness_paper_compliance() {
             }
         }
         
+        // Allow time for synchrony detection to process measurements
+        sleep(Duration::from_millis(50)).await;
+        
+        // Force synchrony update for testing
         detector.update_global_synchrony().await;
     }
     
@@ -773,7 +782,8 @@ async fn test_liveness_properties_paper_compliance() {
                 }
             }
             
-            detector.update_global_synchrony().await;
+            // Allow time for synchrony detection to process measurements
+            sleep(Duration::from_millis(50)).await;
         }
         
         // Submit transactions

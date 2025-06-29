@@ -1,6 +1,7 @@
 // Comprehensive tests for production networking features
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
 use tokio::time::sleep;
@@ -13,6 +14,13 @@ use crate::network::{
     reliability::FaultDetectionThresholds
 };
 use crate::error::HotStuffError;
+
+// Global port counter for tests to avoid conflicts
+static NEXT_PORT: AtomicU16 = AtomicU16::new(20000);
+
+fn get_next_port() -> u16 {
+    NEXT_PORT.fetch_add(1, Ordering::SeqCst)
+}
 
 /// Test setup for production networking
 struct NetworkTestSetup {
@@ -28,9 +36,9 @@ impl NetworkTestSetup {
         let mut addresses = Vec::new();
         
         // Generate unique addresses for each node
-        let base_port = 20000u16;
-        for i in 0..node_count {
-            let addr = format!("127.0.0.1:{}", base_port + i as u16)
+        for _i in 0..node_count {
+            let port = get_next_port();
+            let addr = format!("127.0.0.1:{}", port)
                 .parse::<SocketAddr>()
                 .unwrap();
             addresses.push(addr);

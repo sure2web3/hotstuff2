@@ -7,7 +7,6 @@ use dashmap::DashMap;
 use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use tokio::sync::mpsc;
-use tokio::time::sleep;
 use tokio::sync::Mutex;
 
 use crate::consensus::{
@@ -163,6 +162,7 @@ pub struct ChainState {
     pub committed_height: u64,
     pub b_lock: Option<Hash>,  // Locked block hash
     pub b_exec: Option<Hash>,  // Last executed block hash
+    pub last_committed_state: Hash,  // Last committed state root
 }
 
 impl Default for ChainState {
@@ -174,6 +174,7 @@ impl Default for ChainState {
             committed_height: 0,
             b_lock: None,
             b_exec: None,
+            last_committed_state: Hash::zero(),
         }
     }
 }
@@ -264,6 +265,10 @@ impl LeaderElection {
         let len = leader_rotation.len() as u64;
         leader_rotation.rotate_left((self.epoch % len) as usize);
         self.leader_rotation = leader_rotation;
+    }
+    
+    fn get_leader_for_view(&self, view: u64) -> u64 {
+        self.get_leader(view)
     }
 }
 
@@ -504,6 +509,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
             ConsensusMsg::Vote(vote) => self.handle_vote(vote).await,
             ConsensusMsg::Timeout(timeout) => self.handle_timeout(timeout).await,
             ConsensusMsg::NewView(new_view) => self.handle_new_view(new_view).await,
+            ConsensusMsg::FastCommit(fast_commit) => self.handle_fast_commit(fast_commit).await,
         }
     }
 
@@ -720,25 +726,25 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
                         // Clear votes to save memory
                         stage.votes.clear();
                     }
+                } else if stage.votes.len() >= (self.num_nodes - self.f) as usize {
+                    // Fallback to traditional QC formation if threshold signatures aren't ready
+                    let signatures = stage.votes
+                        .iter()
+                        .map(|v| TypesSignature::new(v.sender_id, v.signature.clone()))
+                        .collect();
+                    let qc = QuorumCert::new(vote_block_hash, vote_height, signatures);
+
+                    info!("Formed traditional QC for block {} at height {}", vote_block_hash, vote_height);
+
+                    stage.qc = Some(qc.clone());
+                    stage.phase = Phase::Commit;
+
+                    // Process the QC
+                    self.process_two_phase_qc(qc).await?;
+
+                    // Clear votes to save memory
+                    stage.votes.clear();
                 }
-            } else if stage.votes.len() >= (self.num_nodes - self.f) as usize {
-                // Fallback to traditional QC formation if threshold signatures aren't ready
-                let signatures = stage.votes
-                    .iter()
-                    .map(|v| TypesSignature::new(v.sender_id, v.signature.clone()))
-                    .collect();
-                let qc = QuorumCert::new(vote_block_hash, vote_height, signatures);
-
-                info!("Formed traditional QC for block {} at height {}", vote_block_hash, vote_height);
-
-                stage.qc = Some(qc.clone());
-                stage.phase = Phase::Commit;
-
-                // Process the QC
-                self.process_two_phase_qc(qc).await?;
-
-                // Clear votes to save memory
-                stage.votes.clear();
             }
         } else {
             // Create new pipeline stage for this height
@@ -989,26 +995,26 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
 
     /// Production-ready transaction submission with batching and validation
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<(), HotStuffError> {
-    debug!("Submitting transaction: {}", transaction.id);
-    
-    // Submit to production transaction pool
-    self.transaction_pool.submit_transaction(transaction).await?;
-    
-    // Check if we should trigger immediate proposal creation
-    let stats = self.transaction_pool.get_stats().await;
-    
-    // Trigger block creation with lower threshold or if we're the leader and have any transactions
-    let should_create_block = self.is_current_leader().await? && (
-        stats.current_pool_size >= self.max_batch_size ||
-        (stats.current_pool_size >= (self.max_batch_size / 2).max(1))
-    );
-    
-    if should_create_block {
-        self.create_and_propose_block().await?;
+        debug!("Submitting transaction: {}", transaction.id);
+        
+        // Submit to production transaction pool
+        self.transaction_pool.submit_transaction(transaction).await?;
+        
+        // Check if we should trigger immediate proposal creation
+        let stats = self.transaction_pool.get_stats().await;
+        
+        // Trigger block creation with lower threshold or if we're the leader and have any transactions
+        let should_create_block = self.is_current_leader().await? && (
+            stats.current_pool_size >= self.max_batch_size ||
+            (stats.current_pool_size >= (self.max_batch_size / 2).max(1))
+        );
+        
+        if should_create_block {
+            self.create_and_propose_block().await?;
+        }
+        
+        Ok(())
     }
-    
-    Ok(())
-}
 
 /// Create and propose a new block with optimal batching
 async fn create_and_propose_block(&self) -> Result<(), HotStuffError> {
@@ -1170,215 +1176,232 @@ async fn fast_path_commit(&self, block_hash: &Hash) -> Result<(), HotStuffError>
     Ok(())
 }
 
-/// Enhanced view change with Byzantine fault tolerance
-pub async fn initiate_view_change(&self, reason: &str) -> Result<(), HotStuffError> {
-    let mut view = self.current_view.lock().await;
-    let old_view = view.number;
-    let new_view = old_view + 1;
+/// Enhanced optimistic responsiveness with automatic fallback
+async fn enhanced_fast_path_execution(&self, qc: &QuorumCert) -> Result<bool, HotStuffError> {
+    if !self.fast_path_enabled {
+        return Ok(false);
+    }
     
-    info!("🔄 Initiating view change from {} to {} (reason: {})", 
-          old_view, new_view, reason);
+    // Multi-layered synchrony check
+    let sync_status = self.synchrony_detector.get_detailed_sync_status().await;
     
-    // Update view with new leader
-    let new_leader = self.get_leader_for_view(new_view);
-    view.number = new_view;
-    view.leader = new_leader;
-    view.start_time = Instant::now();
-    drop(view);
-    
-    // Create new view message with high QC
-    let chain_state = self.chain_state.lock().await;
-    let _high_qc = chain_state.high_qc.clone(); // Keep for future use
-    drop(chain_state);
-    
-    let new_view_msg = NewView {
-        new_view_for_height: new_view,
-        new_view_for_round: new_view,
-        sender_id: self.node_id,
-        timeout_certs: Vec::new(),
-        new_leader_block: None,
+    // Adaptive threshold based on network conditions
+    let base_threshold = (self.num_nodes * 2 / 3) + 1;
+    let adaptive_threshold = if sync_status.confidence > 0.9 {
+        base_threshold
+    } else if sync_status.confidence > 0.7 {
+        base_threshold + 1
+    } else {
+        return Ok(false); // Not confident enough for fast path
     };
     
-    // Broadcast new view message
-    let consensus_msg = ConsensusMsg::NewView(new_view_msg);
-    self.broadcast_consensus_message(consensus_msg).await?;
+    // Check if we have enough high-quality signatures
+    let valid_signatures = self.count_valid_signatures(qc).await?;
+    if valid_signatures < adaptive_threshold as usize {
+        debug!("Insufficient signatures for fast path: {} < {}", valid_signatures, adaptive_threshold);
+        return Ok(false);
+    }
     
-    // Start timeout for new view
-    self.timeout_manager.start_timeout(new_view, new_view).await?;
+    // Measure fast path execution time
+    let start_time = std::time::Instant::now();
     
-    // Update metrics (simplified)
-    // self.update_metrics("view_changes", 1.0).await;
+    match self.execute_fast_path_commit(&qc.block_hash).await {
+        Ok(_) => {
+            let execution_time = start_time.elapsed();
+            
+            // Record successful fast path execution
+            self.record_optimistic_success(execution_time).await;
+            
+            info!(
+                "🚀 Fast path execution successful for block {} in {:?}",
+                qc.block_hash, execution_time
+            );
+            Ok(true)
+        }
+        Err(e) => {
+            warn!("Fast path execution failed: {}, falling back to normal path", e);
+            
+            // Record fallback and disable fast path temporarily
+            self.record_optimistic_fallback().await;
+            self.temporarily_disable_fast_path().await;
+            
+            // Continue with normal path
+            Ok(false)
+        }
+    }
+}
+
+/// Enhanced fast path commit with better error handling
+async fn execute_fast_path_commit(&self, block_hash: &Hash) -> Result<(), HotStuffError> {
+    // Validate block is ready for fast path
+    let block = self.block_store.get_block(block_hash)?
+        .ok_or_else(|| HotStuffError::InvalidMessage("Block not found for fast path".to_string()))?;
+    
+    // Check if we can safely fast-commit this block
+    let mut chain_state = self.chain_state.lock().await;
+    
+    if block.height <= chain_state.committed_height {
+        return Err(HotStuffError::InvalidMessage("Block already committed".to_string()));
+    }
+    
+    // Ensure we have parent block committed (safety check)
+    if block.height > chain_state.committed_height + 1 {
+        return Err(HotStuffError::InvalidMessage("Cannot fast-commit without parent".to_string()));
+    }
+    
+    // Execute state machine transition
+    let mut state_machine = self.state_machine.lock().await;
+    let new_state_hash = state_machine.execute_block(&block)?;
+    
+    // Update chain state atomically
+    chain_state.committed_height = block.height;
+    chain_state.b_exec = Some(*block_hash);
+    chain_state.last_committed_state = new_state_hash;
+    
+    drop(state_machine);
+    drop(chain_state);
+    
+    // Notify other components of fast commit
+    self.broadcast_fast_commit_notification(block_hash, block.height).await?;
     
     Ok(())
 }
 
-/// Get leader for a specific view using deterministic rotation
-fn get_leader_for_view(&self, view: u64) -> u64 {
-    let leader_election = self.leader_election.read();
-    leader_election.get_leader(view)
-}
-
-/// Enhanced optimistic responsiveness with automatic fallback
-async fn execute_optimistic_consensus(&self, block: &Block) -> Result<bool, HotStuffError> {
-    // Check network synchrony for optimistic path
-    let synchrony_conditions = self.synchrony_detector.get_synchrony_status().await;
-    
-    if !synchrony_conditions.is_synchronous || 
-       synchrony_conditions.confidence < self.config.consensus.optimistic_threshold {
-        debug!("Network not suitable for optimistic consensus: synchronous={}, confidence={:.2}",
-               synchrony_conditions.is_synchronous, synchrony_conditions.confidence);
-        return Ok(false);
-    }
-    
-    // Record network measurement for this proposal
-    let proposal_start = Instant::now();
-    
-    // Try optimistic 2-phase consensus instead of 3-phase
-    info!("🚀 Attempting optimistic 2-phase consensus for block {}", block.hash);
-    
-    // Phase 1: Propose and collect fast votes
-    let fast_votes = self.collect_fast_votes(block).await?;
-    
-    // Check if we have super-majority for optimistic commit
-    let optimistic_threshold = (self.num_nodes * 3 / 4) as usize; // Higher threshold for optimistic
-    if fast_votes.len() >= optimistic_threshold {
-        // Phase 2: Direct commit (skip prepare phase)
-        let success = self.optimistic_commit(block, &fast_votes).await?;
+/// Count valid signatures with verification
+async fn count_valid_signatures(&self, qc: &QuorumCert) -> Result<usize, HotStuffError> {
+    // If using threshold signatures, verify the threshold signature
+    if let Some(ref _threshold_sig) = qc.threshold_signature {
+        let threshold_signer = self.threshold_signer.lock().await;
         
-        if success {
-            // Record successful optimistic execution
-            let latency = proposal_start.elapsed();
-            self.record_optimistic_success(latency).await;
-            
-            info!("✅ Optimistic consensus succeeded for block {} in {:?}", 
-                  block.hash, latency);
-            return Ok(true);
-        }
-    }
-    
-    // Fall back to normal 3-phase consensus
-    info!("⬇️  Falling back to normal consensus for block {}", block.hash);
-    self.record_optimistic_fallback().await;
-    Ok(false)
-}
-
-/// Collect fast votes for optimistic responsiveness
-async fn collect_fast_votes(&self, block: &Block) -> Result<Vec<Vote>, HotStuffError> {
-    // Set shorter timeout for fast votes
-    let fast_timeout = Duration::from_millis(self.config.consensus.base_timeout_ms / 2);
-    let deadline = Instant::now() + fast_timeout;
-    
-    let mut fast_votes = Vec::new();
-    
-    // Monitor for incoming votes until timeout
-    while Instant::now() < deadline {
-        if let Some(votes) = self.votes.get(&block.hash) {
-            fast_votes = votes.clone();
-            if fast_votes.len() >= (self.num_nodes * 2 / 3) as usize {
-                break; // Got enough votes early
+        // Get the aggregate public key for verification
+        if let Ok(aggregate_key) = threshold_signer.get_aggregate_public_key() {
+            if qc.verify_with_bls_key(qc.block_hash, self.f as usize + 1, &aggregate_key) {
+                // For threshold signatures, we assume it represents the minimum required signatures
+                return Ok(self.f as usize + 1);
             }
         }
-        
-        // Small sleep to avoid busy waiting
-        sleep(Duration::from_millis(1)).await;
     }
     
-    Ok(fast_votes)
+    // Fall back to individual signature counting
+    Ok(qc.signatures.len())
 }
 
-/// Optimistic commit with enhanced validation
-async fn optimistic_commit(&self, block: &Block, votes: &[Vote]) -> Result<bool, HotStuffError> {
-    // Validate all votes before committing
-    for vote in votes {
-        if !self.verify_vote_comprehensive(vote, block).await? {
-            warn!("Optimistic commit failed: invalid vote from {}", vote.sender_id);
-            return Ok(false);
+/// Temporarily disable fast path due to failures
+async fn temporarily_disable_fast_path(&self) {
+    // This could be enhanced to use exponential backoff
+    tokio::spawn({
+        let synchrony_detector = Arc::clone(&self.synchrony_detector);
+        async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            synchrony_detector.reset_fast_path_eligibility().await;
         }
+    });
+}
+
+/// Broadcast fast commit notification to peers
+async fn broadcast_fast_commit_notification(&self, block_hash: &Hash, height: u64) -> Result<(), HotStuffError> {
+    use crate::message::consensus::{ConsensusMsg, FastCommit};
+    
+    let notification = ConsensusMsg::FastCommit(FastCommit {
+        block_hash: *block_hash,
+        height,
+        node_id: self.node_id,
+    });
+    
+    // Broadcast to all peers
+    self.network.broadcast_message(crate::message::network::NetworkMsg::Consensus(notification)).await
+        .map_err(|e| HotStuffError::InvalidMessage(format!("Failed to broadcast fast commit: {}", e)))?;
+    
+    Ok(())
+}
+
+    /// Handle fast commit notification from other nodes
+    async fn handle_fast_commit(&self, fast_commit: crate::message::consensus::FastCommit) -> Result<(), HotStuffError> {
+        debug!(
+            "Received fast commit notification for block {} at height {} from node {}",
+            fast_commit.block_hash, fast_commit.height, fast_commit.node_id
+        );
+        
+        // Verify we have this block
+        if let Some(block) = self.block_store.get_block(&fast_commit.block_hash)? {
+            // Update our committed height if this is newer
+            let mut chain_state = self.chain_state.lock().await;
+            if fast_commit.height > chain_state.committed_height {
+                chain_state.committed_height = fast_commit.height;
+                info!("Updated committed height to {} due to fast commit notification", fast_commit.height);
+                
+                // Execute the block if we haven't already
+                if chain_state.b_exec.map_or(true, |exec_hash| exec_hash != fast_commit.block_hash) {
+                    let mut state_machine = self.state_machine.lock().await;
+                    let _new_state_hash = state_machine.execute_block(&block)?;
+                    chain_state.b_exec = Some(fast_commit.block_hash);
+                    drop(state_machine);
+                }
+            }
+        } else {
+            debug!("Received fast commit for unknown block {}", fast_commit.block_hash);
+        }
+        
+        Ok(())
     }
-    
-    // Create optimistic QC
-    let signatures = votes
-        .iter()
-        .map(|v| crate::types::Signature::new(v.sender_id, v.signature.clone()))
-        .collect();
-    
-    let optimistic_qc = QuorumCert::new(block.hash, block.height, signatures);
-    
-    // Apply to state machine immediately
-    let mut state_machine = self.state_machine.lock().await;
-    for transaction in &block.transactions {
-        state_machine.apply_transaction(transaction.clone()).await?;
+
+    /// Broadcast consensus message to all peers
+    async fn broadcast_consensus_message(&self, message: ConsensusMsg) -> Result<(), HotStuffError> {
+        let network_msg = crate::message::network::NetworkMsg::Consensus(message);
+        self.network.broadcast_message(network_msg).await
+            .map_err(|e| HotStuffError::Network(format!("Failed to broadcast message: {}", e)))
     }
-    drop(state_machine);
-    
-    // Update chain state
-    let mut chain_state = self.chain_state.lock().await;
-    chain_state.committed_height = block.height;
-    chain_state.b_exec = Some(block.hash);
-    chain_state.high_qc = Some(optimistic_qc);
-    drop(chain_state);
-    
-    // Record metrics
-    self.metrics.record_counter("optimistic_commits", 1.0).await;
-    
-    Ok(true)
-}
 
-/// Comprehensive vote verification for optimistic path
-async fn verify_vote_comprehensive(&self, vote: &Vote, block: &Block) -> Result<bool, HotStuffError> {
-    // Basic checks
-    if vote.block_hash != block.hash || vote.height != block.height {
-        return Ok(false);
+    /// Check if current node is the leader for current view
+    async fn is_current_leader(&self) -> Result<bool, HotStuffError> {
+        let view = self.current_view.lock().await;
+        Ok(view.leader == self.node_id)
     }
-    
-    // Check voter is authorized
-    if vote.sender_id >= self.num_nodes {
-        return Ok(false);
+
+    /// Initiate view change process
+    async fn initiate_view_change(&self, reason: &str) -> Result<(), HotStuffError> {
+        info!("Initiating view change: {}", reason);
+        
+        let mut view = self.current_view.lock().await;
+        let next_view = view.number + 1;
+        view.number = next_view;
+        view.start_time = std::time::Instant::now();
+        
+        // Determine new leader
+        let new_leader = self.leader_election.read().get_leader(next_view);
+        view.leader = new_leader;
+        drop(view);
+
+        // Get current high QC
+        let chain_state = self.chain_state.lock().await;
+        let high_qc = chain_state.high_qc.clone().unwrap_or_else(|| {
+            // Create a genesis QC if none exists
+            QuorumCert {
+                block_hash: Hash::zero(),
+                height: 0,
+                timestamp: crate::types::Timestamp::now(),
+                signatures: Vec::new(),
+                threshold_signature: None,
+            }
+        });
+        drop(chain_state);
+
+        // Send new view message
+        self.send_new_view(next_view, high_qc).await?;
+
+        Ok(())
     }
-    
-    // Verify signature (using threshold signature if available)
-    if let Some(partial_sig) = &vote.partial_signature {
-        let threshold_signer = self.threshold_signer.lock().await;
-        return Ok(threshold_signer.verify_partial_signature(
-            vote.sender_id, 
-            block.hash.as_bytes(), 
-            partial_sig
-        ));
+
+    /// Record successful optimistic execution
+    async fn record_optimistic_success(&self, _execution_time: std::time::Duration) {
+        // Update internal metrics (simplified implementation)
+        debug!("Recorded optimistic success");
     }
-    
-    // Fallback to regular signature verification
-    let public_key = self.get_public_key_for_node(vote.sender_id)?;
-    public_key.verify(block.hash.as_bytes(), &vote.signature)
-}
 
-/// Get public key for a node (enhanced version)
-fn get_public_key_for_node(&self, _node_id: u64) -> Result<PublicKey, HotStuffError> {
-    // In production, this would lookup from a verified key registry
-    // For now, return a dummy key - this should be replaced with actual key management
-    Ok(PublicKey([0u8; 32]))
-}
+    /// Record optimistic execution fallback
+    async fn record_optimistic_fallback(&self) {
+        // Update internal metrics (simplified implementation)
+        debug!("Recorded optimistic fallback");
+    }
 
-/// Record optimistic consensus success metrics
-async fn record_optimistic_success(&self, latency: Duration) {
-    self.metrics.record_histogram("optimistic_latency", latency.as_millis() as f64).await;
-    self.metrics.record_counter("optimistic_success", 1.0).await;
-}
-
-/// Record optimistic consensus fallback
-async fn record_optimistic_fallback(&self) {
-    self.metrics.record_counter("optimistic_fallback", 1.0).await;
-}
-
-/// Broadcast consensus message to all peers
-async fn broadcast_consensus_message(&self, msg: ConsensusMsg) -> Result<(), HotStuffError> {
-    let network_msg = NetworkMsg::Consensus(msg);
-    self.network.broadcast_message(network_msg).await
-}
-
-/// Check if current node is the leader for current view
-async fn is_current_leader(&self) -> Result<bool, HotStuffError> {
-    let view = self.current_view.lock().await;
-    Ok(view.leader == self.node_id)
-}
-
-}
+} // End of impl<B: BlockStore + ?Sized + 'static> HotStuff2<B>

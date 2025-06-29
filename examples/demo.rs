@@ -229,13 +229,18 @@ async fn demo_consensus_protocol() -> Result<(), HotStuffError> {
     let initial_view = 0; // Since we can't access private fields, we'll use 0
     println!("✅ Initial view: {}, Leader: {}", initial_view, initial_view % 4);
 
-    // Trigger view change
-    node.initiate_view_change("Demo timeout").await?;
-    let new_view = initial_view + 1; // Assume it incremented
-    println!("✅ After view change: {}, Leader: {}", new_view, new_view % 4);
+    // Demonstrate node information
+    let node_id = node.get_node_id();
+    println!("✅ Node ID: {}", node_id);
+    
+    // Demonstrate synchrony detection
+    let synchrony_detector = node.get_synchrony_detector();
+    let is_synchronous = synchrony_detector.is_network_synchronous().await;
+    println!("✅ Network synchronous: {}", is_synchronous);
 
-    assert!(new_view > initial_view);
-    println!("✅ View change successful");
+    // Start the consensus node (this starts the message processing loop)
+    node.start();
+    println!("✅ HotStuff-2 consensus node started");
 
     // Demonstrate block creation
     println!("\n🧱 Block Creation...");

@@ -9,6 +9,14 @@ pub enum ConsensusMsg {
     Vote(Vote),
     Timeout(Timeout),
     NewView(NewView),
+    FastCommit(FastCommit),
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct FastCommit {
+    pub block_hash: Hash,
+    pub height: u64,
+    pub node_id: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use log::{debug, info};
+use log::debug;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
 
@@ -108,6 +108,7 @@ impl PeerSyncStats {
     
     fn recalculate_stats(&mut self) {
         if self.measurements.is_empty() {
+            self.is_responsive = false;
             return;
         }
         
@@ -139,6 +140,11 @@ impl PeerSyncStats {
         };
         
         self.variance = Duration::from_millis(variance_ms);
+        
+        // Update responsiveness based on synchrony parameters
+        // Use default parameters for the responsiveness check
+        let default_params = SynchronyParameters::default();
+        self.is_responsive = self.is_synchronized(&default_params);
     }
     
     fn is_synchronized(&self, params: &SynchronyParameters) -> bool {
@@ -153,6 +159,7 @@ impl PeerSyncStats {
 }
 
 /// Production synchrony detector for HotStuff-2 optimistic responsiveness
+#[derive(Clone)]
 pub struct ProductionSynchronyDetector {
     node_id: u64,
     parameters: SynchronyParameters,
@@ -215,7 +222,7 @@ impl ProductionSynchronyDetector {
             loop {
                 interval.tick().await;
                 detector.update_global_synchrony().await;
-                detector.cleanup_stale_measurements().await;
+                detector.cleanup_stale_measurements();
             }
         });
         
@@ -304,125 +311,91 @@ impl ProductionSynchronyDetector {
         }
     }
     
+    /// Get detailed synchrony status for adaptive thresholds
+    pub async fn get_detailed_sync_status(&self) -> NetworkConditions {
+        let current_conditions = self.global_conditions.lock().await;
+        current_conditions.clone()
+    }
+
+    /// Reset fast path eligibility after failures
+    pub async fn reset_fast_path_eligibility(&self) {
+        // This could be enhanced with more sophisticated logic
+        // For now, just log the reset
+        debug!("Resetting fast path eligibility");
+    }
+
+    /// Update global synchrony status based on peer measurements
     pub async fn update_global_synchrony(&self) {
-        let responsive_peers: Vec<PeerSyncStats> = {
-            let stats = self.peer_stats.read();
-            stats
-                .values()
-                .filter(|ps| ps.is_synchronized(&self.parameters))
-                .cloned()
-                .collect()
+        // Collect peer statistics without holding the lock across await
+        let (total_peers, responsive_peers, avg_latencies) = {
+            let peer_stats = self.peer_stats.read();
+            
+            if peer_stats.is_empty() {
+                (0, 0, Vec::new())
+            } else {
+                let total_peers = peer_stats.len();
+                let responsive_peers = peer_stats.values().filter(|p| p.is_responsive).count();
+                let avg_latencies: Vec<Duration> = peer_stats.values()
+                    .map(|p| p.average_latency)
+                    .collect();
+                (total_peers, responsive_peers, avg_latencies)
+            }
         };
         
-        let total_peers = {
-            let stats = self.peer_stats.read();
-            stats.len()
-        };
-        
-        let responsive_count = responsive_peers.len();
+        let mut global_conditions = self.global_conditions.lock().await;
         
         if total_peers == 0 {
-            let mut conditions = self.global_conditions.lock().await;
-            *conditions = NetworkConditions::unknown();
+            *global_conditions = NetworkConditions::unknown();
             return;
         }
+
+        // Calculate aggregate statistics
+        let total_latency_ms: u64 = avg_latencies.iter().map(|d| d.as_millis() as u64).sum();
+        let average_latency = Duration::from_millis(total_latency_ms / total_peers as u64);
         
-        // Calculate overall network conditions
-        let average_latency = if !responsive_peers.is_empty() {
-            responsive_peers
-                .iter()
-                .map(|ps| ps.average_latency)
-                .sum::<Duration>() / responsive_peers.len() as u32
-        } else {
-            Duration::from_millis(0)
-        };
+        // Calculate variance
+        let mean = average_latency.as_millis() as f64;
+        let sum_squares: f64 = avg_latencies.iter()
+            .map(|d| {
+                let diff = d.as_millis() as f64 - mean;
+                diff * diff
+            })
+            .sum();
+        let variance = Duration::from_millis((sum_squares / total_peers as f64).sqrt() as u64);
         
-        let average_variance = if !responsive_peers.is_empty() {
-            responsive_peers
-                .iter()
-                .map(|ps| ps.variance)
-                .sum::<Duration>() / responsive_peers.len() as u32
-        } else {
-            Duration::from_millis(0)
-        };
+        // Determine synchrony
+        let is_sync = responsive_peers >= (total_peers * 2 / 3) &&
+                     average_latency <= self.parameters.max_network_delay &&
+                     variance <= self.parameters.max_variance;
         
-        // Calculate confidence based on responsive peer ratio and measurement quality
-        let peer_ratio = responsive_count as f64 / total_peers as f64;
-        let latency_confidence = if average_latency <= self.parameters.max_network_delay {
-            1.0 - (average_latency.as_millis() as f64 / self.parameters.max_network_delay.as_millis() as f64)
-        } else {
-            0.0
-        };
-        
-        let variance_confidence = if average_variance <= self.parameters.max_variance {
-            1.0 - (average_variance.as_millis() as f64 / self.parameters.max_variance.as_millis() as f64)
+        let confidence = if total_peers > 0 {
+            (responsive_peers as f64 / total_peers as f64) * 
+            if is_sync { 0.9 } else { 0.1 }
         } else {
             0.0
         };
         
-        let confidence = peer_ratio * latency_confidence * variance_confidence;
-        
-        let is_synchronous = confidence >= self.parameters.confidence_threshold &&
-            responsive_count >= (total_peers / 2) && // Majority of peers responsive
-            average_latency <= self.parameters.max_network_delay &&
-            average_variance <= self.parameters.max_variance;
-        
-        let new_conditions = NetworkConditions {
-            is_synchronous,
+        *global_conditions = NetworkConditions {
+            is_synchronous: is_sync,
             confidence,
             average_latency,
-            latency_variance: average_variance,
+            latency_variance: variance,
             connected_peers: total_peers,
             last_updated: Instant::now(),
         };
-        
-        {
-            let mut conditions = self.global_conditions.lock().await;
-            let was_sync = conditions.is_synchronous;
-            *conditions = new_conditions.clone();
-            
-            if was_sync != is_synchronous {
-                info!(
-                    "Network synchrony changed: {} (confidence: {:.2})",
-                    if is_synchronous { "SYNCHRONOUS" } else { "ASYNCHRONOUS" },
-                    confidence
-                );
-            }
-        }
-        
-        debug!(
-            "Synchrony update: {}/{} responsive peers, avg latency: {:?}, confidence: {:.2}",
-            responsive_count, total_peers, average_latency, confidence
-        );
     }
-    
-    async fn cleanup_stale_measurements(&self) {
-        let stale_threshold = self.parameters.sync_check_interval * 5;
-        let mut stats = self.peer_stats.write();
-        
-        stats.retain(|_, peer_stat| {
-            peer_stat.last_measurement.elapsed() < stale_threshold
-        });
-        
-        for peer_stat in stats.values_mut() {
-            peer_stat.measurements.retain(|measurement| {
-                measurement.timestamp.elapsed() < stale_threshold
-            });
-        }
-    }
-}
 
-impl Clone for ProductionSynchronyDetector {
-    fn clone(&self) -> Self {
-        Self {
-            node_id: self.node_id,
-            parameters: self.parameters.clone(),
-            peer_stats: Arc::clone(&self.peer_stats),
-            global_conditions: Arc::clone(&self.global_conditions),
-            measurement_counter: Arc::clone(&self.measurement_counter),
-        }
+    /// Clean up old measurements to prevent memory growth
+    fn cleanup_stale_measurements(&self) {
+        let mut peer_stats = self.peer_stats.write();
+        let cutoff = Instant::now() - Duration::from_secs(60); // Remove measurements older than 1 minute
+        
+        peer_stats.retain(|_peer_id, stats| {
+            stats.last_measurement >= cutoff
+        });
     }
-}
+
+} // End of impl ProductionSynchronyDetector
 
 /// Detailed synchrony statistics for monitoring and debugging
 #[derive(Debug, Clone)]

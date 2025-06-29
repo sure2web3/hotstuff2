@@ -165,8 +165,6 @@ impl ProductionBenchmark {
                     }
                 }
             }
-            
-            detector.update_global_synchrony().await;
         }
         
         Ok(Self {

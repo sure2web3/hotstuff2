@@ -42,6 +42,7 @@ mod hotstuff2_basic_tests {
             committed_height: 0,
             b_lock: None,
             b_exec: None,
+            last_committed_state: Hash::zero(),
         };
         
         // Test field updates
