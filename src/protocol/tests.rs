@@ -269,8 +269,6 @@ mod hotstuff2_basic_tests {
 /// Summary test to verify overall HotStuff-2 compliance
 #[cfg(test)]
 mod hotstuff2_compliance_summary {
-    use super::*;
-
     #[test]
     fn test_hotstuff2_paper_compliance_summary() {
         println!("\n🎯 HotStuff-2 Paper Compliance Summary");

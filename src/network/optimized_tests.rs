@@ -5,10 +5,9 @@ use log::info;
 
 use crate::message::consensus::ConsensusMsg;
 use crate::message::network::{NetworkMsg, PeerDiscoveryMsg, PeerAddr};
-use crate::network::test_utils::{OptimizedNetworkTestSetup, NetworkTestHelper};
+use crate::network::test_utils::OptimizedNetworkTestSetup;
 use crate::network::reliability::FaultDetectionThresholds;
 use crate::network::{NetworkReliabilityManager, NetworkFaultDetector};
-use crate::error::HotStuffError;
 
 #[tokio::test]
 async fn test_optimized_tcp_connectivity() {
@@ -215,7 +214,7 @@ async fn test_concurrent_network_operations_optimized() {
         
         let task = tokio::spawn(async move {
             for j in 0..3 {
-                let test_message = NetworkMsg::PeerDiscovery(PeerDiscoveryMsg::Hello(PeerAddr {
+                let _test_message = NetworkMsg::PeerDiscovery(PeerDiscoveryMsg::Hello(PeerAddr {
                     node_id: sender_id,
                     address: format!("127.0.0.1:{}", 30000 + j),
                 }));

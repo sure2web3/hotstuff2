@@ -1352,7 +1352,7 @@ async fn verify_vote_comprehensive(&self, vote: &Vote, block: &Block) -> Result<
 }
 
 /// Get public key for a node (enhanced version)
-fn get_public_key_for_node(&self, node_id: u64) -> Result<PublicKey, HotStuffError> {
+fn get_public_key_for_node(&self, _node_id: u64) -> Result<PublicKey, HotStuffError> {
     // In production, this would lookup from a verified key registry
     // For now, return a dummy key - this should be replaced with actual key management
     Ok(PublicKey([0u8; 32]))

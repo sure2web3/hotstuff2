@@ -444,7 +444,6 @@ impl LivenessEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Transaction, Timestamp};
 
     #[test]
     fn test_safety_double_voting() {

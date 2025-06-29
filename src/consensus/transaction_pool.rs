@@ -467,7 +467,7 @@ impl ProductionTxPool {
                     tx_index.remove(&hash);
                     
                     // Update indices for remaining transactions
-                    for (existing_hash, existing_index) in tx_index.iter_mut() {
+                    for (_existing_hash, existing_index) in tx_index.iter_mut() {
                         if *existing_index > index {
                             *existing_index -= 1;
                         }

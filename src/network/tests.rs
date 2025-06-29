@@ -12,7 +12,6 @@ use crate::network::{
     TcpNetwork, ProductionNetworkManager, NetworkReliabilityManager, NetworkFaultDetector,
     reliability::FaultDetectionThresholds
 };
-use crate::network::tcp_network::{TcpNetworkMessage, NetworkPayload as TcpNetworkPayload};
 use crate::error::HotStuffError;
 
 /// Test setup for production networking

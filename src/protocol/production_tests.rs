@@ -3,18 +3,16 @@
 /// This file contains extensive tests for all HotStuff-2 features
 /// including optimistic responsiveness, pipelining, and Byzantine fault tolerance
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use crate::config::HotStuffConfig;
 use crate::consensus::synchrony::ProductionSynchronyDetector;
-use crate::crypto::{KeyPair, ThresholdSigner};
+use crate::crypto::ThresholdSigner;
 use crate::error::HotStuffError;
-use crate::protocol::hotstuff2::{HotStuff2, Phase, ChainState};
+use crate::protocol::hotstuff2::{HotStuff2, ChainState};
 use crate::storage::block_store::MemoryBlockStore;
 use crate::types::{Block, Hash, Transaction};
 
@@ -27,7 +25,7 @@ pub struct HotStuffTestHarness {
 
 impl HotStuffTestHarness {
     pub async fn new(num_nodes: usize, num_byzantine: usize) -> Result<Self, HotStuffError> {
-        let mut nodes = Vec::new();
+        let nodes = Vec::new();
         let mut configs = Vec::new();
         
         // Generate nodes and configs
@@ -54,12 +52,12 @@ impl HotStuffTestHarness {
     }
     
     /// Simulate network conditions
-    pub async fn simulate_network_conditions(&self, latency: Duration, packet_loss: f64) {
+    pub async fn simulate_network_conditions(&self, _latency: Duration, _packet_loss: f64) {
         // TODO: Implement network simulation
     }
     
     /// Inject Byzantine behavior
-    pub async fn inject_byzantine_behavior(&self, behavior: ByzantineBehavior) {
+    pub async fn inject_byzantine_behavior(&self, _behavior: ByzantineBehavior) {
         // TODO: Implement Byzantine fault injection
     }
 }
@@ -310,7 +308,7 @@ mod production_tests {
     async fn test_view_change_mechanism() -> Result<(), HotStuffError> {
         println!("🧪 Testing View Change Mechanism");
         
-        let num_nodes = 4;
+        let _num_nodes = 4;
         let f = 1;
         let timeout_threshold = f + 1; // f + 1 timeouts trigger view change
         
@@ -449,8 +447,6 @@ mod production_tests {
 /// Summary test to verify overall production readiness
 #[cfg(test)]
 mod production_readiness_summary {
-    use super::*;
-    
     #[tokio::test]
     async fn test_production_readiness_summary() {
         println!("\n🎯 HotStuff-2 Production Readiness Summary");

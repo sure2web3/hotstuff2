@@ -9,13 +9,13 @@ use rand_chacha::ChaCha20Rng;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-use crate::crypto::{BlsSecretKey, BlsSignature, ProductionThresholdSigner};
+use crate::crypto::{BlsSecretKey, ProductionThresholdSigner};
 use crate::error::HotStuffError;
-use crate::message::consensus::{ConsensusMsg, Vote};
-use crate::network::{P2PNetwork, P2PMessage, MessagePayload};
+use crate::message::consensus::ConsensusMsg;
+use crate::network::{P2PMessage, MessagePayload};
 use crate::protocol::hotstuff2::HotStuff2;
 use crate::storage::block_store::MemoryBlockStore;
-use crate::types::{Block, Hash, QuorumCert, Transaction};
+use crate::types::{Hash, Transaction};
 
 /// Types of Byzantine behaviors to simulate
 #[derive(Debug, Clone)]
@@ -280,12 +280,12 @@ impl ByzantineFaultTestHarness {
         info!("Creating BFT test harness: {} total nodes, {} Byzantine", num_nodes, num_byzantine);
         
         // Create legitimate nodes (placeholder - would need full node setup)
-        let mut legitimate_nodes = Vec::new();
-        let mut byzantine_nodes = Vec::new();
+        let legitimate_nodes = Vec::new();
+        let byzantine_nodes = Vec::new();
         
         // This is a simplified setup - in practice would need full networking, crypto, etc.
         for i in 0..num_nodes {
-            let block_store = Arc::new(MemoryBlockStore::new());
+            let _block_store = Arc::new(MemoryBlockStore::new());
             // Note: This is simplified - would need proper HotStuff2 construction
             // let node = Arc::new(HotStuff2::new(...));
             // legitimate_nodes.push(node.clone());
@@ -312,21 +312,21 @@ impl ByzantineFaultTestHarness {
         let test_duration = Duration::from_secs(30);
         let start_time = tokio::time::Instant::now();
         
-        let mut safety_violations = Vec::new();
-        let mut committed_blocks: HashMap<u64, usize> = HashMap::new();
-        let mut view_changes = 0;
+        let safety_violations = Vec::new();
+        let committed_blocks: HashMap<u64, usize> = HashMap::new();
+        let view_changes = 0;
         let mut message_count = 0;
         
         // Run test scenario
         while start_time.elapsed() < test_duration {
             // Simulate transaction submission
-            let tx = Transaction::new(
+            let _tx = Transaction::new(
                 format!("tx_{}", message_count),
                 format!("test_transaction_{}", message_count).into_bytes(),
             );
             
             // Process messages and detect safety violations
-            for (node_id, _node) in self.legitimate_nodes.iter().enumerate() {
+            for (_node_id, _node) in self.legitimate_nodes.iter().enumerate() {
                 // Check for forked chains or conflicting commits
                 // This would involve checking each node's committed state
             }
@@ -395,7 +395,7 @@ impl ByzantineFaultTestHarness {
         let start_time = tokio::time::Instant::now();
         
         let mut throughput_measurements = Vec::new();
-        let mut latency_measurements = Vec::new();
+        let latency_measurements = Vec::new();
         let mut resource_usage = Vec::new();
         
         while start_time.elapsed() < test_duration {
@@ -404,7 +404,7 @@ impl ByzantineFaultTestHarness {
             // Submit batch of transactions
             let batch_size = 10;
             for i in 0..batch_size {
-                let tx = Transaction::new(
+                let _tx = Transaction::new(
                     format!("perf_tx_{}_{}", start_time.elapsed().as_millis(), i),
                     vec![i as u8; 100], // 100-byte transaction
                 );

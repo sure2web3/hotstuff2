@@ -201,11 +201,6 @@ impl BlsSecretKey {
         // Cache generator for repeated use
         G1Projective::generator() * scalar
     }
-    
-    /// Simple hash-to-curve implementation (fallback for compatibility)
-    fn hash_to_g1(&self, message: &[u8]) -> G1Projective {
-        self.hash_to_g1_fast(message)
-    }
 }
 
 /// Production-ready threshold signature scheme with enhanced features

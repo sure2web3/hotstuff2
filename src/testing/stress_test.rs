@@ -164,7 +164,7 @@ pub struct ResourceStats {
 /// Transaction generator for load testing
 pub struct TransactionGenerator {
     node_id: usize,
-    target_tps: u64,
+    _target_tps: u64,
     transaction_size: usize,
     pub generated_count: u64,
 }
@@ -173,7 +173,7 @@ impl TransactionGenerator {
     pub fn new(node_id: usize, target_tps: u64, _seed: u64) -> Self {
         Self {
             node_id,
-            target_tps,
+            _target_tps: target_tps,
             transaction_size: 256, // Default transaction size
             generated_count: 0,
         }
@@ -206,14 +206,14 @@ impl TransactionGenerator {
 
 /// Byzantine fault injection system
 pub struct ByzantineFaultInjector {
-    behaviors: Vec<ByzantineBehavior>,
+    _behaviors: Vec<ByzantineBehavior>,
     active: bool,
 }
 
 impl ByzantineFaultInjector {
     pub fn new(behaviors: Vec<ByzantineBehavior>) -> Self {
         Self {
-            behaviors,
+            _behaviors: behaviors,
             active: true,
         }
     }

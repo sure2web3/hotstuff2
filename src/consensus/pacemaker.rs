@@ -169,7 +169,7 @@ impl LeaderElection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::Duration;
 
     #[tokio::test]
     async fn test_pacemaker_timeout() {

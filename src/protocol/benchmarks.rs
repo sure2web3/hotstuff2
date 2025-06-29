@@ -9,7 +9,6 @@ use serde::{Serialize, Deserialize};
 
 use crate::config::HotStuffConfig;
 use crate::consensus::{ProductionTxPool, TxPoolConfig};
-use crate::consensus::synchrony::{ProductionSynchronyDetector, SynchronyParameters};
 use crate::consensus::state_machine::KVStateMachine;
 use crate::crypto::{KeyPair, ProductionThresholdSigner as BlsThresholdSigner};
 use crate::error::HotStuffError;
@@ -18,7 +17,7 @@ use crate::message::network::PeerAddr;
 use crate::protocol::hotstuff2::HotStuff2;
 use crate::storage::block_store::MemoryBlockStore;
 use crate::timer::TimeoutManager;
-use crate::types::{Block, Transaction};
+use crate::types::Transaction;
 
 /// Benchmark configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,7 +76,7 @@ pub struct ProductionBenchmark {
     tx_pools: Vec<Arc<ProductionTxPool>>,
     start_time: Option<Instant>,
     transactions_submitted: Vec<(Transaction, Instant)>,
-    transactions_committed: Vec<(Transaction, Instant)>,
+    _transactions_committed: Vec<(Transaction, Instant)>,
 }
 
 impl ProductionBenchmark {
@@ -89,12 +88,12 @@ impl ProductionBenchmark {
         
         // Generate BLS threshold keys
         let threshold = (config.num_nodes * 2 / 3) + 1;
-        let (_aggregate_key, secret_keys) = BlsThresholdSigner::generate_keys(threshold, config.num_nodes)
+        let (_aggregate_key, _secret_keys) = BlsThresholdSigner::generate_keys(threshold, config.num_nodes)
             .map_err(|_| HotStuffError::Consensus("Failed to generate BLS keys".to_string()))?;
         
         for i in 0..config.num_nodes {
             // Node setup
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let key_pair = KeyPair::generate(&mut rng);
             let block_store = Arc::new(MemoryBlockStore::new());
             let mut peers = HashMap::new();
@@ -176,7 +175,7 @@ impl ProductionBenchmark {
             tx_pools,
             start_time: None,
             transactions_submitted: Vec::new(),
-            transactions_committed: Vec::new(),
+            _transactions_committed: Vec::new(),
         })
     }
     

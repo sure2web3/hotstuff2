@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::config::{HotStuffConfig, NodeConfig, ConsensusConfig, NetworkConfig};
+use crate::config::{ConsensusConfig, NetworkConfig};
 use crate::consensus::synchrony::{ProductionSynchronyDetector, LatencyMeasurement, SynchronyParameters};
 use crate::crypto::bls_threshold::ProductionThresholdSigner;
 use crate::error::HotStuffError;
@@ -57,7 +57,7 @@ mod working_integration_tests {
         
         // Check synchrony status
         let status = detector.get_synchrony_status().await;
-        let is_sync = detector.is_network_synchronous().await;
+        let _is_sync = detector.is_network_synchronous().await;
         
         println!("    Network synchrony status: is_synchronous={}, confidence={:.2}", 
                 status.is_synchronous, status.confidence);

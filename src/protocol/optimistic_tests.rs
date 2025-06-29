@@ -5,11 +5,9 @@ use std::collections::HashMap;
 
 use tokio::time::sleep;
 use log::info;
-use rand::Rng;
 
 use crate::config::HotStuffConfig;
 use crate::consensus::{ProductionTxPool, TxPoolConfig};
-use crate::consensus::synchrony::{ProductionSynchronyDetector, SynchronyParameters};
 use crate::consensus::state_machine::KVStateMachine;
 use crate::crypto::{KeyPair, ProductionThresholdSigner as BlsThresholdSigner};
 use crate::error::HotStuffError;
@@ -18,13 +16,11 @@ use crate::network::NetworkClient;
 use crate::protocol::hotstuff2::HotStuff2;
 use crate::storage::block_store::MemoryBlockStore;
 use crate::timer::TimeoutManager;
-use crate::types::{Block, Hash, Transaction};
+use crate::types::Transaction;
 
 /// Test setup for production features
 struct ProductionTestSetup {
     nodes: Vec<Arc<HotStuff2<MemoryBlockStore>>>,
-    tx_pools: Vec<Arc<ProductionTxPool>>,
-    block_stores: Vec<Arc<MemoryBlockStore>>,
 }
 
 impl ProductionTestSetup {
@@ -35,12 +31,12 @@ impl ProductionTestSetup {
         
         // Generate BLS keys for all nodes
         let threshold = (num_nodes * 2 / 3) + 1;
-        let (_aggregate_key, secret_keys) = BlsThresholdSigner::generate_keys(threshold, num_nodes)
+        let (_aggregate_key, _secret_keys) = BlsThresholdSigner::generate_keys(threshold, num_nodes)
             .map_err(|_| HotStuffError::Consensus("Failed to generate BLS keys".to_string()))?;
         
         for i in 0..num_nodes {
             // Create individual components
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let key_pair = KeyPair::generate(&mut rng);
             let block_store = Arc::new(MemoryBlockStore::new());
             let peers = HashMap::new(); // Empty peers for testing
@@ -86,8 +82,6 @@ impl ProductionTestSetup {
         
         Ok(Self {
             nodes,
-            tx_pools,
-            block_stores,
         })
     }
     

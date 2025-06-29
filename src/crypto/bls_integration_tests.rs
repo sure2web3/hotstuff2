@@ -1,7 +1,5 @@
 // Comprehensive BLS integration tests for HotStuff-2 consensus
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use super::bls_threshold::{
     BlsSecretKey, BlsPublicKey, 

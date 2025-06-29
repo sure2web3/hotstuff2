@@ -302,7 +302,7 @@ mod tests {
         let (public_key, secret_keys) = ThresholdSigner::generate_keys(threshold, total_nodes).unwrap();
         
         let mut signer1 = ThresholdSigner::new(secret_keys[0].clone(), public_key.clone());
-        let mut signer2 = ThresholdSigner::new(secret_keys[1].clone(), public_key.clone());
+        let signer2 = ThresholdSigner::new(secret_keys[1].clone(), public_key.clone());
         
         // Create partial signatures
         let partial1 = signer1.sign_partial(message).unwrap();
@@ -332,7 +332,7 @@ mod tests {
         
         let (public_key, secret_keys) = ThresholdSigner::generate_keys(threshold, total_nodes).unwrap();
         
-        let mut signer = ThresholdSigner::new(secret_keys[0].clone(), public_key);
+        let signer = ThresholdSigner::new(secret_keys[0].clone(), public_key);
         let _partial = signer.sign_partial(message).unwrap();
         
         // Try to combine with only 1 signature (need 3)

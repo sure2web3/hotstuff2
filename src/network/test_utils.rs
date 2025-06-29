@@ -176,7 +176,7 @@ impl OptimizedNetworkTestSetup {
         while start.elapsed() < timeout {
             let mut all_connected = true;
             
-            for (i, network) in self.networks.iter().enumerate() {
+            for (_i, network) in self.networks.iter().enumerate() {
                 let stats = network.get_network_statistics().await;
                 
                 // Check if this node has connections to most other nodes

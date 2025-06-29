@@ -85,7 +85,6 @@ impl QuorumCert {
     fn verify_bls_signature(&self, message: &[u8], signature: &BlsSignature, public_key: &BlsPublicKey) -> bool {
         use bls12_381::{pairing, G1Projective, G2Affine};
         use sha2::{Digest, Sha256};
-        use ff::Field;
         use bls12_381::Scalar;
         use group::Curve;
 

@@ -14,7 +14,7 @@ use crate::types::Transaction;
 #[tokio::test]
 async fn test_basic_node_creation() {
     // Test that we can create a basic HotStuff2 node with all the fixed components
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let key_pair = KeyPair::generate(&mut rng);
     let block_store = Arc::new(MemoryBlockStore::new());
     let peers = HashMap::new();
@@ -45,7 +45,7 @@ async fn test_basic_node_creation() {
 
 #[tokio::test]
 async fn test_transaction_submission() {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let key_pair = KeyPair::generate(&mut rng);
     let block_store = Arc::new(MemoryBlockStore::new());
     let peers = HashMap::new();
