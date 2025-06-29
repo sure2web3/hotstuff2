@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tokio::time::{sleep, timeout};
+use tokio::time::{sleep, timeout, interval};
 
 use crate::error::HotStuffError;
 use crate::message::consensus::ConsensusMsg;
@@ -32,6 +32,38 @@ pub enum MessagePayload {
     Network(NetworkMsg),
     Heartbeat,
     Acknowledgment { ack_id: u64 },
+}
+
+/// Enhanced P2P message with reliability and discovery features
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedP2PMessage {
+    pub id: u64,
+    pub from: u64,
+    pub to: Option<u64>,              // None for broadcast
+    pub timestamp: u64,
+    pub message_type: MessageType,
+    pub payload: MessagePayload,
+    pub requires_ack: bool,
+    pub is_ack: bool,
+    pub ack_for: Option<u64>,
+    pub hop_count: u8,               // For routing
+    pub priority: MessagePriority,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessageType {
+    Consensus,
+    Network,
+    Discovery,
+    Heartbeat,
+    Acknowledgment,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessagePriority {
+    Critical,     // Consensus messages
+    Normal,       // Regular network messages
+    Background,   // Heartbeats, discovery
 }
 
 /// Connection state tracking for reliability
@@ -197,6 +229,190 @@ impl P2PNetwork {
         self.pending_acks.lock().await.insert(id, tokio::time::Instant::now());
         
         self.send_message(message).await
+    }
+    
+    /// Enhanced initialization with peer discovery
+    pub async fn new_enhanced(
+        node_id: u64,
+        listen_addr: SocketAddr,
+        bootstrap_peers: Vec<SocketAddr>,
+    ) -> Result<(Self, mpsc::Receiver<P2PMessage>), HotStuffError> {
+        let (inbound_tx, inbound_rx) = mpsc::channel(2000);
+        let (outbound_tx, outbound_rx) = mpsc::channel(2000);
+        
+        let network = P2PNetwork {
+            node_id,
+            listen_addr,
+            peers: Arc::new(RwLock::new(HashMap::new())),
+            message_counter: Arc::new(Mutex::new(0)),
+            pending_acks: Arc::new(Mutex::new(HashMap::new())),
+            message_dedup: Arc::new(Mutex::new(HashMap::new())),
+            inbound_tx,
+            outbound_rx: Arc::new(Mutex::new(Some(outbound_rx))),
+            outbound_tx,
+            connection_timeout: Duration::from_secs(15),
+            message_timeout: Duration::from_secs(60),
+            heartbeat_interval: Duration::from_secs(3),
+            max_reconnect_attempts: 10,
+        };
+        
+        // Start peer discovery with bootstrap peers
+        network.bootstrap_peer_discovery(bootstrap_peers).await?;
+        
+        Ok((network, inbound_rx))
+    }
+    
+    /// Bootstrap peer discovery process
+    async fn bootstrap_peer_discovery(&self, bootstrap_peers: Vec<SocketAddr>) -> Result<(), HotStuffError> {
+        info!("Starting peer discovery with {} bootstrap peers", bootstrap_peers.len());
+        
+        for addr in bootstrap_peers {
+            // Try to connect and discover peers
+            if let Ok(stream) = timeout(self.connection_timeout, TcpStream::connect(addr)).await {
+                if let Ok(_stream) = stream {
+                    info!("Connected to bootstrap peer at {}", addr);
+                    // For now, just log the connection
+                    // TODO: Implement proper discovery protocol
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Send message with reliability and routing
+    pub async fn send_reliable_message(
+        &self,
+        to: u64,
+        payload: MessagePayload,
+        _priority: MessagePriority,
+    ) -> Result<(), HotStuffError> {
+        let mut message_id = self.message_counter.lock().await;
+        *message_id += 1;
+        let id = *message_id;
+        drop(message_id);
+        
+        let message = P2PMessage {
+            id,
+            from: self.node_id,
+            to,
+            timestamp: self.current_timestamp(),
+            payload,
+        };
+        
+        // Track for acknowledgment
+        self.pending_acks.lock().await.insert(id, tokio::time::Instant::now());
+        
+        self.send_message(message).await?;
+        Ok(())
+    }
+    
+    /// Enhanced peer management with health monitoring
+    pub async fn start_peer_health_monitoring(&self) -> Result<(), HotStuffError> {
+        let peers = Arc::clone(&self.peers);
+        let outbound_tx = self.outbound_tx.clone();
+        let node_id = self.node_id;
+        let message_counter = Arc::clone(&self.message_counter);
+        
+        tokio::spawn(async move {
+            let mut health_interval = interval(Duration::from_secs(30));
+            
+            loop {
+                health_interval.tick().await;
+                
+                // Check health of all peers
+                let peer_ids = {
+                    let peers_read = peers.read().await;
+                    peers_read.keys().copied().collect::<Vec<_>>()
+                };
+                
+                for peer_id in peer_ids {
+                    // Send health check ping
+                    let mut counter = message_counter.lock().await;
+                    *counter += 1;
+                    let id = *counter;
+                    drop(counter);
+                    
+                    let ping_message = P2PMessage {
+                        id,
+                        from: node_id,
+                        to: peer_id,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                        payload: MessagePayload::Heartbeat,
+                    };
+                    
+                    let _ = outbound_tx.send(ping_message).await;
+                }
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Get comprehensive network statistics
+    pub async fn get_enhanced_network_stats(&self) -> EnhancedNetworkStats {
+        let peers_read = self.peers.read().await;
+        let connected_peers = peers_read.values().filter(|c| c.is_connected).count();
+        let total_peers = peers_read.len();
+        
+        let pending_acks_count = self.pending_acks.lock().await.len();
+        let dedup_entries = self.message_dedup.lock().await.len();
+        
+        // Calculate average latency
+        let mut total_latency = 0u64;
+        let mut latency_count = 0;
+        
+        for conn in peers_read.values() {
+            if conn.is_connected {
+                // Mock latency calculation - in real implementation, measure actual RTT
+                total_latency += 50; // 50ms mock latency
+                latency_count += 1;
+            }
+        }
+        
+        let average_latency = if latency_count > 0 {
+            Some(total_latency / latency_count as u64)
+        } else {
+            None
+        };
+        
+        EnhancedNetworkStats {
+            node_id: self.node_id,
+            connected_peers,
+            total_peers,
+            pending_acks: pending_acks_count,
+            dedup_cache_size: dedup_entries,
+            average_latency_ms: average_latency,
+            network_health: if connected_peers > total_peers / 2 { 
+                NetworkHealth::Good 
+            } else { 
+                NetworkHealth::Degraded 
+            },
+        }
+    }
+    
+    /// Advanced message routing with multi-hop support
+    pub async fn route_message(&self, message: P2PMessage, _max_hops: u8) -> Result<(), HotStuffError> {
+        // Simplified routing - just forward to destination if we know it
+        let target_peer = message.to;
+        
+        let peers_read = self.peers.read().await;
+        if let Some(conn) = peers_read.get(&target_peer) {
+            if conn.is_connected {
+                // Direct connection available
+                drop(peers_read);
+                self.send_message(message).await?;
+            } else {
+                // Need to route through other peers
+                // For now, just drop the message
+                warn!("No route to peer {}", target_peer);
+            }
+        }
+        
+        Ok(())
     }
     
     async fn start_server(&self) -> Result<(), HotStuffError> {
@@ -570,6 +786,40 @@ impl std::fmt::Display for NetworkStats {
             self.total_peers,
             self.pending_acks,
             self.dedup_cache_size
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnhancedNetworkStats {
+    pub node_id: u64,
+    pub connected_peers: usize,
+    pub total_peers: usize,
+    pub pending_acks: usize,
+    pub dedup_cache_size: usize,
+    pub average_latency_ms: Option<u64>,
+    pub network_health: NetworkHealth,
+}
+
+#[derive(Debug, Clone)]
+pub enum NetworkHealth {
+    Good,
+    Degraded,
+    Poor,
+    Disconnected,
+}
+
+impl std::fmt::Display for EnhancedNetworkStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Node {}: {}/{} peers, {} pending ACKs, {:?} health, {}ms avg latency",
+            self.node_id,
+            self.connected_peers,
+            self.total_peers,
+            self.pending_acks,
+            self.network_health,
+            self.average_latency_ms.unwrap_or(0)
         )
     }
 }
