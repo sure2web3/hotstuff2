@@ -498,7 +498,7 @@ impl EnhancedByzantineNode {
     }
     
     /// Execute nothing-at-stake attack
-    async fn execute_nothing_at_stake_attack(&self, message: P2PMessage, target_peers: &[u64]) -> Vec<P2PMessage> {
+    async fn execute_nothing_at_stake_attack(&self, message: P2PMessage, _target_peers: &[u64]) -> Vec<P2PMessage> {
         if let MessagePayload::Consensus(ConsensusMsg::Vote(vote)) = &message.payload {
             info!("Byzantine node {} executing nothing-at-stake attack", self.node_id);
             
@@ -995,7 +995,7 @@ impl ByzantineTestHarness {
     
     /// Start safety monitoring task
     fn start_safety_monitoring(&self) -> tokio::task::JoinHandle<()> {
-        let safety_violations = self.safety_violations.clone();
+        let _safety_violations = self.safety_violations.clone();
         let test_duration = self.test_duration;
         
         tokio::spawn(async move {
@@ -1319,20 +1319,20 @@ mod comprehensive_tests {
         let test_message = P2PMessage {
             id: 1,
             from: 0,
-            to: vec![1, 2, 3],
-            payload: P2PPayload::Consensus(
+            to: 1, // Single target node
+            payload: MessagePayload::Consensus(
                 crate::message::consensus::ConsensusMsg::Vote(
                     crate::message::consensus::Vote {
                         block_hash: crate::types::Hash::zero(),
                         height: 1,
                         view: 1,
                         sender_id: 0,
-                        signature: crate::crypto::signature::Signature::default(),
+                        signature: vec![0u8; 32],
                         partial_signature: None,
                     }
                 )
             ),
-            timestamp: std::time::SystemTime::now(),
+            timestamp: 12345, // Simple timestamp
         };
         
         // Execute DoS attack and get results
