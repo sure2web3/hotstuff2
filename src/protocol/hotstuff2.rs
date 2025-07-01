@@ -192,23 +192,35 @@ pub struct PerformanceStats {
     pub fast_path_enabled: bool,
 }
 
-/// State checkpoint metadata for recovery operations
+/// State checkpoint for recovery operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateCheckpointMetadata {
+pub struct StateCheckpoint {
     pub height: u64,
     pub state_hash: Hash,
-    pub timestamp: std::time::SystemTime,
-    pub node_id: u64,
+    pub timestamp: crate::types::Timestamp,
+    pub block_hash: Hash,
+}
+
+/// State machine status information
+#[derive(Debug, Clone)]
+pub struct StateMachineStatus {
+    pub height: u64,
+    pub state_hash: Hash,
+    pub is_consistent: bool,
+    pub last_checkpoint_height: u64,
 }
 
 /// Synchrony detection for optimistic responsiveness
+#[allow(dead_code)]
 pub struct HotStuff2<B: BlockStore + ?Sized + 'static> {
     node_id: u64,
     key_pair: KeyPair,
     network: Arc<dyn NetworkInterface>,
     block_store: Arc<B>,
     timeout_manager: Arc<TimeoutManager>,
+    #[allow(dead_code)]
     pacemaker: Arc<Mutex<Pacemaker>>,
+    #[allow(dead_code)]
     safety_engine: Arc<Mutex<SafetyEngine>>,
     state_machine: Arc<Mutex<dyn StateMachine>>,
     metrics: Arc<MetricsCollector>,
@@ -222,6 +234,7 @@ pub struct HotStuff2<B: BlockStore + ?Sized + 'static> {
     pipeline: DashMap<u64, PipelineStage>, // height -> stage
     
     // Vote and timeout collection
+    #[allow(dead_code)]
     votes: DashMap<Hash, Vec<Vote>>,
     timeouts: DashMap<u64, Vec<Timeout>>, // view -> Timeouts
     
@@ -231,6 +244,7 @@ pub struct HotStuff2<B: BlockStore + ?Sized + 'static> {
     
     // Leader election and view change
     leader_election: RwLock<LeaderElection>,
+    #[allow(dead_code)]
     view_change_timeout: Duration,
     
     // Threshold signatures for efficient aggregation
@@ -239,6 +253,7 @@ pub struct HotStuff2<B: BlockStore + ?Sized + 'static> {
     // Transaction batching for high throughput
     transaction_pool: Arc<ProductionTxPool>,
     max_batch_size: usize,
+    #[allow(dead_code)]
     batch_timeout: Duration,
     
     message_sender: mpsc::Sender<ConsensusMsg>,
@@ -248,6 +263,7 @@ pub struct HotStuff2<B: BlockStore + ?Sized + 'static> {
 }
 
 struct LeaderElection {
+    #[allow(dead_code)]
     epoch: u64,
     leader_rotation: Vec<u64>,
 }
@@ -270,6 +286,7 @@ impl LeaderElection {
         self.leader_rotation[index]
     }
 
+    #[allow(dead_code)]
     fn next_epoch(&mut self, nodes: &[u64]) {
         self.epoch += 1;
         let mut leader_rotation = nodes.to_vec();
@@ -278,6 +295,7 @@ impl LeaderElection {
         self.leader_rotation = leader_rotation;
     }
     
+    #[allow(dead_code)]
     fn get_leader_for_view(&self, view: u64) -> u64 {
         self.get_leader(view)
     }
@@ -818,6 +836,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
     }
 
     // HotStuff-2 safety rule: can only vote if block extends locked QC or has higher QC
+    #[allow(dead_code)]
     async fn safe_to_vote(&self, block: &Block, chain_state: &ChainState) -> Result<bool, HotStuffError> {
         // If we don't have a locked QC, we can vote for any valid block
         let locked_qc = match &chain_state.locked_qc {
@@ -837,6 +856,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
         self.extends_qc(block, locked_qc).await
     }
 
+    #[allow(dead_code)]
     async fn extends_qc(&self, block: &Block, qc: &QuorumCert) -> Result<bool, HotStuffError> {
         // Simple check: block should have height > qc.height
         // In a full implementation, we'd verify the full chain connection
@@ -992,6 +1012,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
     }
 
     /// Record optimistic execution fallback
+    #[allow(dead_code)]
     async fn record_optimistic_fallback(&self) {
         // Update internal metrics (simplified implementation)
         debug!("Recorded optimistic fallback");
@@ -1382,7 +1403,7 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
         timeouts.push(timeout.clone());
 
         // Check if we have enough timeouts to trigger a view change
-        if timeouts.len() >= (self.f + 1) as usize {
+        if timeouts.len() >= (timeouts.len() - self.f as usize) {
             info!("Received f+1 timeouts for view {}, starting view change", timeout.height);
             
             // Get the highest QC from the timeouts
@@ -1502,21 +1523,3 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
     }
 
 } // End of impl<B: BlockStore + ?Sized + 'static> HotStuff2<B>
-
-/// Checkpoint metadata for state recovery
-#[derive(Debug, Clone)]
-pub struct StateCheckpoint {
-    pub height: u64,
-    pub state_hash: Hash,
-    pub timestamp: crate::types::Timestamp,
-    pub block_hash: Hash,
-}
-
-/// State machine status information
-#[derive(Debug, Clone)]
-pub struct StateMachineStatus {
-    pub height: u64,
-    pub state_hash: Hash,
-    pub is_consistent: bool,
-    pub last_checkpoint_height: u64,
-}

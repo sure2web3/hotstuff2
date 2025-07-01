@@ -668,11 +668,11 @@ async fn test_network_infrastructure_basics() {
     }
     
     // Test reliability manager creation
-    let reliability_manager = NetworkReliabilityManager::new(0);
+    let _reliability_manager = NetworkReliabilityManager::new(0);
     info!("Reliability manager created successfully");
     
     // Test fault detector creation  
-    let fault_detector = NetworkFaultDetector::new(
+    let _fault_detector = NetworkFaultDetector::new(
         0,
         FaultDetectionThresholds::default(),
     );

@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 use tokio::time::sleep;
-use log::info;
 
 #[cfg(test)]
 mod tests {
@@ -18,7 +17,7 @@ mod tests {
         let attack_pattern = ByzantineAttackPattern::DenialOfService { message_rate: 5 };
         println!("✅ Created attack pattern");
         
-        let harness = ByzantineTestHarness::new(
+        let _harness = ByzantineTestHarness::new(
             3, // 3 honest nodes
             1, // 1 Byzantine node
             vec![attack_pattern],
