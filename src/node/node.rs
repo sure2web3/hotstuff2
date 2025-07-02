@@ -16,7 +16,6 @@ use crate::node::NodeConfig;
 use crate::protocol::hotstuff2::HotStuff2;
 use crate::storage::{block_store::MemoryBlockStore, BlockStore, Mempool, RocksDBStore};
 use crate::timer::TimeoutManager;
-use crate::types::Proposal;
 
 pub struct Node {
     config: NodeConfig,
@@ -181,7 +180,7 @@ impl Node {
         let (_tx, mut rx) = mpsc::channel::<(u64, NetworkMsg)>(100);
 
         // Clone necessary fields
-        let hotstuff = self.hotstuff.as_ref().unwrap().get_message_sender();
+        let hotstuff = self.hotstuff.as_ref().unwrap().message_sender();
         let node_id = self.config.node_id;
 
         tokio::spawn(async move {
@@ -235,11 +234,16 @@ impl Node {
     pub async fn propose(&self, block: crate::types::Block) -> Result<(), HotStuffError> {
         let hotstuff = self.hotstuff.as_ref().ok_or(HotStuffError::NotRunning)?;
 
-        let proposal = Proposal::new(block);
-        let sender = hotstuff.get_message_sender();
+        let consensus_proposal = crate::message::consensus::ConsensusProposal {
+            block_hash: block.hash,
+            view: 0, // Would be determined by consensus
+            node_id: self.node_id(),
+            qc: None,
+        };
+        let sender = hotstuff.message_sender();
 
         sender
-            .send(ConsensusMsg::Proposal(proposal))
+            .send(ConsensusMsg::Proposal(consensus_proposal))
             .await
             .map_err(|e| HotStuffError::Network(format!("Send failed: {e}")))?;
 

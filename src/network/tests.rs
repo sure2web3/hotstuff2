@@ -295,11 +295,9 @@ async fn test_broadcast_messaging() {
     // Create a test consensus message (using existing Vote structure)
     let test_vote = crate::message::consensus::Vote {
         view: 1,
-        height: 1,
         block_hash: crate::types::Hash::zero(),
-        sender_id: 0,
-        signature: vec![],
-        partial_signature: None,
+        node_id: 0,
+        signature: crate::types::Signature::new(0, vec![]),
     };
     let test_consensus = ConsensusMsg::Vote(test_vote);
     
@@ -598,11 +596,9 @@ async fn test_production_networking_integration() {
     
     let consensus_msg = ConsensusMsg::Vote(crate::message::consensus::Vote {
         view: 1,
-        height: 1,
         block_hash: crate::types::Hash::zero(),
-        sender_id: 0,
-        signature: vec![],
-        partial_signature: None,
+        node_id: 0,
+        signature: crate::types::Signature::new(0, vec![]),
     });
     
     // Node 0 sends consensus messages to all others

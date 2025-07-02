@@ -157,11 +157,10 @@ async fn test_p2p_network_integration() -> Result<(), crate::error::HotStuffErro
     let test_msg = crate::message::network::NetworkMsg::Consensus(
         crate::message::consensus::ConsensusMsg::NewView(
             crate::message::consensus::NewView {
-                new_view_for_height: 1,
-                new_view_for_round: 1,
-                sender_id: 0,
+                view: 1,
+                node_id: 0,
                 timeout_certs: Vec::new(),
-                new_leader_block: None,
+                high_qc: None,
             }
         )
     );

@@ -87,11 +87,9 @@ async fn test_optimized_broadcast() {
     // Create a test consensus message
     let test_vote = crate::message::consensus::Vote {
         view: 1,
-        height: 1,
         block_hash: crate::types::Hash::zero(),
-        sender_id: 0,
-        signature: vec![],
-        partial_signature: None,
+        node_id: 0,
+        signature: crate::types::Signature::new(0, vec![]),
     };
     let test_consensus = ConsensusMsg::Vote(test_vote);
     

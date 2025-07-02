@@ -14,7 +14,7 @@ use crate::message::consensus::{ConsensusMsg, Vote};
 use crate::network::{P2PMessage, MessagePayload};
 use crate::protocol::hotstuff2::HotStuff2;
 use crate::storage::block_store::MemoryBlockStore;
-use crate::types::{Hash, Block};
+use crate::types::{Hash, Block, Signature};
 
 /// Enhanced Byzantine attack patterns
 #[derive(Debug, Clone)]
@@ -257,7 +257,7 @@ impl EnhancedByzantineNode {
             match consensus_msg {
                 ConsensusMsg::Vote(vote) => {
                     state.current_view = vote.view.max(state.current_view);
-                    state.current_height = vote.height.max(state.current_height);
+                    // Note: height removed from Vote struct, using view instead
                     
                     let key = (vote.view, vote.block_hash);
                     *state.vote_counts.entry(key).or_insert(0) += 1;
@@ -802,12 +802,10 @@ impl EnhancedByzantineNode {
             to: (self.node_id + 1) % 4, // Simple peer selection
             timestamp: round * 1000,
             payload: MessagePayload::Consensus(ConsensusMsg::Vote(Vote {
-                block_hash: Hash::from_bytes(&[(round % 256) as u8; 32]),
-                height: round,
                 view: round,
-                sender_id: self.node_id,
-                signature: vec![0u8; 32], // Placeholder signature
-                partial_signature: None,
+                block_hash: Hash::from_bytes(&[(round % 256) as u8; 32]),
+                node_id: self.node_id,
+                signature: Signature::new(self.node_id, vec![0u8; 32]), // Placeholder signature
             })),
         };
         messages.push(vote_message);
@@ -823,12 +821,10 @@ impl EnhancedByzantineNode {
                         to: i % 4, // Distribute across peers
                         timestamp: round * 1000 + i,
                         payload: MessagePayload::Consensus(ConsensusMsg::Vote(Vote {
-                            block_hash: Hash::from_bytes(&[((round + i) % 256) as u8; 32]),
-                            height: round,
                             view: round,
-                            sender_id: self.node_id,
-                            signature: vec![0u8; 32],
-                            partial_signature: None,
+                            block_hash: Hash::from_bytes(&[((round + i) % 256) as u8; 32]),
+                            node_id: self.node_id,
+                            signature: Signature::new(self.node_id, vec![0u8; 32]),
                         })),
                     };
                     messages.push(flood_message);
@@ -843,12 +839,10 @@ impl EnhancedByzantineNode {
                         to: i as u64 % 4,
                         timestamp: round * 1000,
                         payload: MessagePayload::Consensus(ConsensusMsg::Vote(Vote {
-                            block_hash: Hash::from_bytes(&[((round + i as u64) % 256) as u8; 32]),
-                            height: round,
                             view: round,
-                            sender_id: self.node_id,
-                            signature: vec![0u8; 32],
-                            partial_signature: None,
+                            block_hash: Hash::from_bytes(&[((round + i as u64) % 256) as u8; 32]),
+                            node_id: self.node_id,
+                            signature: Signature::new(self.node_id, vec![0u8; 32]),
                         })),
                     };
                     messages.push(coord_message);
@@ -1101,7 +1095,7 @@ impl ByzantineNode {
             // Create invalid signature
             let mut rng = self.rng.lock().await;
             let random_key = BlsSecretKey::generate(&mut *rng);
-            vote.partial_signature = Some(random_key.sign(b"invalid"));
+            vote.signature = Signature::new(vote.node_id, random_key.sign(b"invalid").to_bytes().to_vec());
         }
         vec![message]
     }
@@ -1895,12 +1889,10 @@ mod comprehensive_tests {
             to: 0,
             timestamp: 1000,
             payload: MessagePayload::Consensus(ConsensusMsg::Vote(Vote {
-                block_hash: Hash::from_bytes(&[1u8; 32]),
-                height: 1,
                 view: 1,
-                sender_id: 1,
-                signature: vec![0u8; 32],
-                partial_signature: None,
+                block_hash: Hash::from_bytes(&[1u8; 32]),
+                node_id: 1,
+                signature: Signature::new(1, vec![0u8; 32]),
             })),
         };
         
@@ -1977,12 +1969,10 @@ mod comprehensive_tests {
             to: 0,
             timestamp: 1000,
             payload: MessagePayload::Consensus(ConsensusMsg::Vote(Vote {
-                block_hash: Hash::from_bytes(&[1u8; 32]),
-                height: 1,
                 view: 1,
-                sender_id: 1,
-                signature: vec![0u8; 32],
-                partial_signature: None,
+                block_hash: Hash::from_bytes(&[1u8; 32]),
+                node_id: 1,
+                signature: Signature::new(1, vec![0u8; 32]),
             })),
         };
         
@@ -2021,12 +2011,10 @@ mod comprehensive_tests {
             payload: MessagePayload::Consensus(
                 crate::message::consensus::ConsensusMsg::Vote(
                     crate::message::consensus::Vote {
-                        block_hash: crate::types::Hash::zero(),
-                        height: 1,
                         view: 1,
-                        sender_id: 0,
-                        signature: vec![0u8; 32],
-                        partial_signature: None,
+                        block_hash: crate::types::Hash::zero(),
+                        node_id: 0,
+                        signature: crate::types::Signature::new(0, vec![0u8; 32]),
                     }
                 )
             ),
