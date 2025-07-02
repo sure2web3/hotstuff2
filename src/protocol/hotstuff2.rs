@@ -995,6 +995,6 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
             ..Default::default()
         };
 
-        Self::new(node_id, key_pair, network_client, block_store, Arc::new(timeout_manager), 4, config, state_machine)
+        Self::new(node_id, key_pair, network_client, block_store, timeout_manager, 4, config, state_machine)
     }
 }

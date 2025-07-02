@@ -350,7 +350,7 @@ impl EnhancedByzantineNode {
             // Generate invalid signature
             let mut rng = self.rng.lock().await;
             let random_key = BlsSecretKey::generate(&mut *rng);
-            vote.partial_signature = Some(random_key.sign(b"invalid_signature"));
+            vote.signature = Signature::new(vote.node_id, random_key.sign(b"invalid_signature").to_bytes().to_vec());
             
             // Update metrics
             {
@@ -1872,10 +1872,10 @@ mod comprehensive_tests {
         byzantine_node.activate_attack_pattern().await;
         
         // Execute a few attack rounds
-        let mut total_equivocations = 0u64;
+        let mut _total_equivocations = 0u64;
         for round in 0..3 {
             let result = byzantine_node.execute_attack_round(round).await;
-            total_equivocations += result.equivocations_created;
+            _total_equivocations += result.equivocations_created;
         }
         
         // Verify attack behavior
@@ -2084,7 +2084,7 @@ mod comprehensive_tests {
         byzantine_node.activate_attack_pattern().await;
         
         // Test with threshold conditions (simulate f=1 Byzantine node tolerance)
-        let mut safety_maintained = true;
+        let safety_maintained = true;
         let mut attack_detected = false;
         
         for round in 0..3 {

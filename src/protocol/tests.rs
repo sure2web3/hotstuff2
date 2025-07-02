@@ -43,6 +43,8 @@ mod hotstuff2_basic_tests {
             b_lock: None,
             b_exec: None,
             last_committed_state: Hash::zero(),
+            prepare_qc: None,
+            pre_commit_qc: None,
         };
         
         // Test field updates
