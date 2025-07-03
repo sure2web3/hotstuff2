@@ -177,13 +177,14 @@ impl Node {
     }
 
     async fn start_message_handler(&self) -> Result<(), HotStuffError> {
-        let (_tx, mut rx) = mpsc::channel::<(u64, NetworkMsg)>(100);
+        let (_tx, rx) = mpsc::channel::<(u64, NetworkMsg)>(100);
 
         // Clone necessary fields
         let hotstuff = self.hotstuff.as_ref().unwrap().message_sender();
         let node_id = self.config.node_id;
 
         tokio::spawn(async move {
+            let mut rx = rx;
             while let Some((sender_id, msg)) = rx.recv().await {
                 match msg {
                     NetworkMsg::Consensus(consensus_msg) => {
@@ -198,6 +199,14 @@ impl Node {
                         // Handle peer discovery
                         // TODO: Implement peer discovery logic
                         debug!("Received peer discovery message: {:?}", discovery_msg);
+                    }
+                    NetworkMsg::Heartbeat => {
+                        // Handle heartbeat messages
+                        debug!("Received heartbeat from peer {}", sender_id);
+                    }
+                    NetworkMsg::PeerInfo(_peer_info) => {
+                        // Handle peer info messages
+                        debug!("Received peer info from peer {}", sender_id);
                     }
                 }
             }

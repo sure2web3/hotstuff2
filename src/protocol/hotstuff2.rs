@@ -156,6 +156,32 @@ impl NetworkInterface for P2PNetworkAdapter {
     }
 }
 
+/// Wrapper for Production TCP P2P network
+pub struct ProductionTcpNetworkAdapter {
+    network: Arc<crate::network::ProductionP2PNetwork>,
+}
+
+impl ProductionTcpNetworkAdapter {
+    pub fn new(network: Arc<crate::network::ProductionP2PNetwork>) -> Self {
+        Self { network }
+    }
+}
+
+#[async_trait]
+impl NetworkInterface for ProductionTcpNetworkAdapter {
+    async fn send_message(&self, peer_id: u64, message: NetworkMsg) -> Result<(), HotStuffError> {
+        self.network.send_to_peer(peer_id, message).await
+    }
+
+    async fn broadcast_message(&self, message: NetworkMsg) -> Result<(), HotStuffError> {
+        self.network.broadcast(message).await
+    }
+
+    async fn get_connected_peers(&self) -> Vec<u64> {
+        self.network.get_connected_peers().await
+    }
+}
+
 /// HotStuff-2 View structure for proper view management
 #[derive(Debug, Clone)]
 pub struct View {
@@ -376,6 +402,21 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
         state_machine: Arc<Mutex<dyn StateMachine>>,
     ) -> Arc<Self> {
         let network: Arc<dyn NetworkInterface> = Arc::new(P2PNetworkAdapter::new(p2p_network));
+        Self::new_with_network(node_id, key_pair, network, block_store, timeout_manager, num_nodes, config, state_machine)
+    }
+
+    /// Create new HotStuff2 instance with Production TCP P2P network
+    pub fn new_with_production_tcp(
+        node_id: u64,
+        key_pair: KeyPair,
+        tcp_network: Arc<crate::network::ProductionP2PNetwork>,
+        block_store: Arc<B>,
+        timeout_manager: Arc<TimeoutManager>,
+        num_nodes: u64,
+        config: HotStuffConfig,
+        state_machine: Arc<Mutex<dyn StateMachine>>,
+    ) -> Arc<Self> {
+        let network: Arc<dyn NetworkInterface> = Arc::new(ProductionTcpNetworkAdapter::new(tcp_network));
         Self::new_with_network(node_id, key_pair, network, block_store, timeout_manager, num_nodes, config, state_machine)
     }
 
@@ -951,6 +992,40 @@ impl<B: BlockStore + ?Sized + 'static> HotStuff2<B> {
 
         self.propose_block(view).await?;
         Ok(Hash::from_bytes(&format!("block_{}", view).as_bytes()))
+    }
+
+    /// Handle incoming network message from peer
+    pub async fn handle_network_message(&self, peer_id: u64, message: NetworkMsg) -> Result<(), HotStuffError> {
+        debug!("Handling network message from peer {}", peer_id);
+        
+        match message {
+            NetworkMsg::Consensus(consensus_msg) => {
+                self.handle_consensus_message(consensus_msg).await
+            }
+            NetworkMsg::Heartbeat => {
+                debug!("Received heartbeat from peer {}", peer_id);
+                Ok(())
+            }
+            NetworkMsg::PeerInfo(_) => {
+                debug!("Received peer info from peer {}", peer_id);
+                Ok(())
+            }
+            NetworkMsg::PeerDiscovery(_discovery_msg) => {
+                debug!("Received peer discovery message from peer {}", peer_id);
+                Ok(())
+            }
+        }
+    }
+
+    /// Handle incoming consensus message
+    async fn handle_consensus_message(&self, msg: ConsensusMsg) -> Result<(), HotStuffError> {
+        match msg {
+            ConsensusMsg::Proposal(proposal) => self.handle_proposal(proposal).await,
+            ConsensusMsg::Vote(vote) => self.handle_vote(vote).await,
+            ConsensusMsg::Timeout(timeout) => self.handle_timeout(timeout).await,
+            ConsensusMsg::NewView(new_view) => self.handle_new_view(new_view).await,
+            ConsensusMsg::FastCommit(fast_commit) => self.handle_fast_commit(fast_commit).await,
+        }
     }
 }
 
